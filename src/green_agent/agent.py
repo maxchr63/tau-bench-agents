@@ -136,6 +136,12 @@ class TauGreenAgentExecutor(AgentExecutor):
         # parse the task
         print("Green agent: Received a task, parsing...")
         user_input = context.get_user_input()
+        
+        # Send immediate acknowledgment to keep connection alive
+        await event_queue.enqueue_event(
+            new_agent_text_message("Task received. Starting tau-bench evaluation...")
+        )
+        
         tags = parse_tags(user_input)
         white_agent_url = tags["white_agent_url"]
         env_config_str = tags["env_config"]
@@ -144,6 +150,10 @@ class TauGreenAgentExecutor(AgentExecutor):
         # set up the environment
         # migrate from https://github.com/sierra-research/tau-bench/blob/4754e6b406507dbcbce8e8b3855dcf80aaec18ac/tau_bench/run.py#L20
         print("Green agent: Setting up the environment...")
+        await event_queue.enqueue_event(
+            new_agent_text_message("Setting up tau-bench environment...")
+        )
+        
         assert len(env_config["task_ids"]) == 1, (
             "Only single task supported for demo purpose"
         )
@@ -159,6 +169,10 @@ class TauGreenAgentExecutor(AgentExecutor):
         metrics = {}
 
         print("Green agent: Starting evaluation...")
+        await event_queue.enqueue_event(
+            new_agent_text_message(f"Starting evaluation of white agent at {white_agent_url}...")
+        )
+        
         timestamp_started = time.time()
         # TODO: replace
         # agent = ToolCallingAgent(

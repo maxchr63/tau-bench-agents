@@ -30,7 +30,7 @@ def prepare_white_agent_card(url):
         version="1.0.0",
         default_input_modes=["text/plain"],
         default_output_modes=["text/plain"],
-        capabilities=AgentCapabilities(),
+        capabilities=AgentCapabilities(streaming=True),
         skills=[skill],
     )
     return card
