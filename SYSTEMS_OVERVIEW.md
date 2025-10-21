@@ -204,8 +204,9 @@ tau-bench-agents/
 ├── .env                         # API keys (ANTHROPIC_API_KEY)
 │
 ├── src/
-│   ├── green_launcher.py       # FastAPI server on port 9110 (FIXED ✅)
-│   ├── white_launcher.py       # FastAPI server on port 9210 (FIXED ✅)
+│   ├── green_launcher.py       # FastAPI server on port 9110 
+
+│   ├── white_launcher.py       # FastAPI server on port 9210 
 │   ├── terminal_launcher.py    # CLI evaluation launcher
 │   │
 │   ├── green_agent/
@@ -217,9 +218,7 @@ tau-bench-agents/
 │       └── tau_white_agent.toml   # Agent card (A2A standard)
 │
 ├── QUICKSTART.md              # Start here! ⭐
-├── REGISTRATION_GUIDE.md      # Detailed guide
 ├── check_status.sh            # Quick health check script
-└── test_launchers.py          # Automated test suite
 ```
 
 

@@ -32,15 +32,29 @@ async def launch_evaluation():
 
     # send the task description
     print("Sending task description to green agent...")
+
+    # TODO: modify task_config as needed and change back to anthropic model
+    # task_config = {
+    #     "env": "retail",
+    #     "user_strategy": "llm",
+    #     # "user_model": "claude-3-7-sonnet-20250219",  # Changed to Claude 3.5 Sonnet
+    #     "user_model": "claude-haiku-4-5-20251001",  # ← Faster, cheaper
+    #     "user_provider": "anthropic",
+    #     "task_split": "test",
+    #     "task_ids": [1],
+    # }
+
+    # changed to gpt-5
     task_config = {
         "env": "retail",
         "user_strategy": "llm",
-        # "user_model": "claude-3-7-sonnet-20250219",  # Changed to Claude 3.5 Sonnet
-        "user_model": "claude-haiku-4-5-20251001",  # ← Faster, cheaper
-        "user_provider": "anthropic",
+        "user_model": "gpt-5",  # Changed to GPT-5
+        "user_provider": "openai",
         "task_split": "test",
         "task_ids": [1],
     }
+
+
     task_text = f"""
 Your task is to instantiate tau-bench to test the agent located at:
 <white_agent_url>

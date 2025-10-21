@@ -52,12 +52,21 @@ class GeneralWhiteAgentExecutor(AgentExecutor):
                 "content": user_input,
             }
         )
+        # TODO: modify task_config as needed and change back to anthropic model
+        # response = completion(
+        #     #model="claude-3-7-sonnet-20250219",  # ← Use Claude
+        #     model="claude-haiku-4-5-20251001",  
+        #     messages=messages,
+        #     temperature=0.0,
+        # )
+
+        # Using OpenAI GPT-4o-mini (fast and cost-effective)
         response = completion(
-            #model="claude-3-7-sonnet-20250219",  # ← Use Claude
-            model="claude-haiku-4-5-20251001",  # ← Faster, cheaper
+            model="gpt-4o-mini",  # Valid OpenAI model
             messages=messages,
             temperature=0.0,
         )
+
         next_message = response.choices[0].message.model_dump()  # type: ignore
         messages.append(
             {
