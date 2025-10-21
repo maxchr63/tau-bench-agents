@@ -1,6 +1,6 @@
 # QUICK START - Register Your Agents in AgentBeats
 
-## TL;DR - What You Need To Do
+## TL;DR 
 
 1. **Start launchers** (in 2 separate terminal windows)
 2. **Open AgentBeats UI** and register agents with the URLs below
@@ -270,42 +270,3 @@ curl http://localhost:9210/status
 | **AgentBeats UI**  | http://localhost:5173 |
 | **AgentBeats API** | http://localhost:9000 |
 | **AgentBeats MCP** | http://localhost:9001 |
-
----
-
-## 🐛 What Was Wrong and Fixed
-
-1. **Port conflict with AgentBeats MCP**:
-
-   - Green agent was on port 9001, conflicting with AgentBeats MCP server ❌
-   - Moved to port 9003 (green) and 9004 (white) ✅
-2. **Critical bug in green_launcher.py**:
-
-   - Line 63 was launching "white" agent instead of "green" ❌
-   - Now correctly launches "green" agent ✅
-3. **Wrong status response**:
-
-   - Launchers returned `"status": "running"` ❌
-   - AgentBeats expects `"status": "server up, with agent running"` ✅
-   - Both launchers now return the correct format ✅
-
----
-
-## 💡 Pro Tips
-
-- Keep the launcher terminal windows open and visible so you can see logs
-- Use `./check_status.sh` to quickly verify everything is running
-- If something breaks, kill everything and restart:
-  ```bash
-  pkill -f 'python.*launcher'
-  pkill -f 'python main.py'
-  # Then start launchers again
-  ```
-
----
-
-## ✅ You're Ready!
-
-Everything is fixed and ready to go. Just follow the 5 steps above and you should see **green dots** 🟢 in the AgentBeats UI!
-
-**Need help?** Run `./check_status.sh` to see what's running and what's not.
