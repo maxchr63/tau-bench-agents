@@ -2,7 +2,6 @@
 
 Example code for agentifying Tau-Bench using A2A and MCP standards.
 
-
 ## 0. Installation
 
 ```bash
@@ -12,7 +11,7 @@ uv sync
 ### 0. Add API keys
 
 First, configure `.env` with
-`ANTHROPIC_API_KEY=` or  
+`ANTHROPIC_API_KEY=` or
 `OPENAI_API_KEY=...`,  (currently setup for open ai api keys)
 The model and provider used can be changed by changing the task, completion and env confing in the respective agent.py files
 (only uncommenting needed)
@@ -46,9 +45,8 @@ agentbeats deploy
 
 Now, you can access the AgentBeats UI at** **[http://localhost:5173](http://localhost:5173/)
 
-
-
 ## 2.  and restart Agents:
+
 This is the way you need to launch the agents, if you want to launch them for agentbeats web-appp
 
 ```shell
@@ -58,7 +56,6 @@ cd /Users/max/Documents/Uni/Berkeley/agentic_ai/tau-bench-agents
 ./start_launchers.sh
 ```
 
-
 I you just want to tun a battle in the terminal, lauching the main in combiation with the terminal launcher is the way to go
 
 ```bash
@@ -67,7 +64,6 @@ uv run python main.py launch
 ```
 
 ## 3. Change Configeration parameters:
-
 
 can be done in `tau-bench-agents/src/green_agent/agent.py`
 
@@ -84,42 +80,44 @@ env_config = {
         }
 ```
 
-##  3. Design Philosophy
+## 3. Design Philosophy
 
 ### Green Agent: Deterministic Orchestrator
 
 Our green agent uses **direct Python orchestration** rather than an LLM-driven tool-calling approach:
 
+So only the green agent is currently able to call the tools and is doing it thought the imported tau-bench environment
+
 ```python
 # We manually control the evaluation loop
 async def execute(self, context: RequestContext, event_queue: EventQueue):
     env = get_env(...)  # Load tau-bench environment
-    
+  
     # Explicit evaluation loop
     for step in range(max_num_steps):
         # 1. Send message to white agent
         response = await my_a2a.send_message(white_agent_url, message)
-        
+      
         # 2. Parse response
         action = parse_white_agent_response(response)
-        
+      
         # 3. Execute in environment
         result = env.step(action)
-        
+      
         # 4. Check completion
         if result.done:
             break
-    
+  
     # Report final results
     await report_battle_results(battle_id, result.reward)
 ```
 
 **Why this approach?**
 
--  **Predictable**: Same evaluation process every time
--  **Transparent**: Easy to understand what's happening
--  **Efficient**: No LLM overhead for orchestration
--  **Suitable**: Tau-bench evaluation is a well-defined procedure
+- **Predictable**: Same evaluation process every time
+- **Transparent**: Easy to understand what's happening
+- **Efficient**: No LLM overhead for orchestration
+- **Suitable**: Tau-bench evaluation is a well-defined procedure
 
 **Alternative approach (not used here):**
 Use the AgentBeats SDK (`@ab.tool`) to make the orchestration LLM-driven, giving the green agent's LLM tools to decide when/how to evaluate. This is more flexible but adds complexity and potential unpredictability.
@@ -127,6 +125,7 @@ Use the AgentBeats SDK (`@ab.tool`) to make the orchestration LLM-driven, giving
 ### White Agent: LLM-Driven Tool User
 
 Our white agent IS LLM-driven because it needs to:
+
 - Understand the task description and policy
 - Choose appropriate tools to call from the available set
 - Respond to the user naturally
@@ -150,11 +149,11 @@ User message: {message}
 """
 ```
 
-
 ## 3. Architecture Overview
 
+
 ```
-┌─────────────────────────────────────────────────────────────┐
+-┌─────────────────────────────────────────────────────────────┐
 │ Tau-Bench Environment (External Package)                    │
 │                                                             │
 │  ┌────────────────┐  ┌──────────────────┐  ┌─────────────┐  │
@@ -179,17 +178,17 @@ User message: {message}
 │                                                             │
 │  1. Get tools_info + wiki from env                          │
 │  2. Format as text prompt                                   │
-│  3. Send to white agent ─────────────────-───┐              │
-│                                              │              │
-│  4. Receive JSON response ◄──────────────────┼───────────┐  │
-│  5. Parse: action = {"name": "...", ...}     │           │  │
-│  6. Execute: env.step(action)                │           │  │
-│  7. Get result: observation, reward, done    │           │  │
-│  8. Send result back to white agent ─────────┼─────┐     │  │
-│                                              │     │     │  │
-└──────────────────────────────────────────────┼─────┼─────┼──┘
-                                               │     │     │
-                                               ▼     │     ▼
+│  3. Send to white agent ─────────────────-──------─┐        │
+│                                                    │        │          
+│  4. Receive JSON response ◄──────────────────┐     │        │
+│  5. Parse: action = {"name": "...", ...}     │     │        │
+│  6. Execute: env.step(action)                │     │        │
+│  7. Get result: observation, reward, done    │     │        │
+│  8. Send result back to white agent ─────────┼─────│        │
+│                                              │     │        │
+└──────────────────────────────────────────────┼─────┼─────-──┘
+                                               │     │     
+                                               │     │     
 ┌────────────────────────────────────────────────────────────-──┐
 │ White Agent (Our Code)                       │     │          │
 │                                              │     │          │
@@ -278,7 +277,6 @@ User message: {message}
 | **AgentBeats API** | http://localhost:9000 |
 | **AgentBeats MCP** | http://localhost:9001 |
 
-
 ## 5. Future Improvements
 
 Based on AgentBeats' upgrade recommendations, here are planned enhancements:
@@ -295,11 +293,11 @@ class TauBenchMCPServer:
     def __init__(self, env):
         self.env = env
         self.app = FastAPI()
-        
+      
         @self.app.get("/tools")
         async def list_tools():
             return self.env.tools_info
-        
+      
         @self.app.post("/execute")
         async def execute_tool(tool_call: ToolCall):
             action = Action(name=tool_call.name, kwargs=tool_call.kwargs)
@@ -313,13 +311,15 @@ class TauBenchMCPServer:
 ```
 
 **Benefits**:
--  Standards-based (MCP is industry standard)
--  White agents can use native tool-calling SDKs
--  Dynamic tool discovery
--  Better separation of concerns
--  More realistic evaluation environment
+
+- Standards-based (MCP is industry standard)
+- White agents can use native tool-calling SDKs
+- Dynamic tool discovery
+- Better separation of concerns
+- More realistic evaluation environment
 
 **Trade-offs**:
+
 - Higher complexity in setup
 - Requires white agents to support MCP protocol
 - More moving parts (additional server process)
@@ -331,6 +331,7 @@ class TauBenchMCPServer:
 **Planned Enhancement**: Support batch evaluation of multiple tasks
 
 **Option A - External Parallelism** (Simpler):
+
 ```python
 # Run multiple battles in parallel
 async def evaluate_multiple_tasks():
@@ -343,6 +344,7 @@ async def evaluate_multiple_tasks():
 ```
 
 **Option B - Internal Parallelism** (More Efficient):
+
 ```python
 # Single green agent manages multiple environments
 class ParallelGreenAgent:
@@ -357,6 +359,7 @@ class ParallelGreenAgent:
 **Current Issue**: Long evaluations risk timeouts with message-only responses
 
 **Planned Enhancement**: Use A2A task-based responses
+
 ```python
 # Create task for long-running evaluation
 task_id = await create_task()
@@ -372,7 +375,8 @@ await send_task_result(task_id, final_result)
 
 **Current State**: Hardcoded to retail environment, specific model configs
 
-**Planned Enhancement**: 
+**Planned Enhancement**:
+
 - CLI options for all tau-bench parameters
 - Support for airline, retail, banking domains
 - Configurable task splits (train/test/dev)
@@ -391,6 +395,7 @@ uv run python main.py launch \
 ### 5. **Multiple White Agent SDKs**
 
 Test white agents built with different frameworks:
+
 - ✅ Current: Custom LLM wrapper
 - 🔄 Planned: Google ADK agents
 - 🔄 Planned: OpenAI Assistants API
