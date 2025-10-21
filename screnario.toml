@@ -1,0 +1,27 @@
+# scenario.toml - Tau-Bench Agent Scenario
+
+[scenario]
+name = "tau-bench-retail"
+description = "Tau-Bench retail agent evaluation scenario"
+
+# Green Agent (Evaluator) with Launcher
+[[agents]]
+name = "tau-bench-green"
+is_green = true
+agent_card_path = "src/green_agent/tau_green_agent.toml"
+launcher_command = "uv run python main.py green"
+agent_host = "0.0.0.0"
+agent_port = 9003
+launcher_host = "0.0.0.0"
+launcher_port = 9110
+
+# White Agent (Target) with Launcher  
+[[agents]]
+name = "retail-white"
+is_green = false
+agent_card_path = "src/white_agent/tau_white_agent.toml"
+launcher_command = "uv run python main.py white"
+agent_host = "0.0.0.0"
+agent_port = 9004
+launcher_host = "0.0.0.0"
+launcher_port = 9210
