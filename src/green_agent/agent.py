@@ -20,6 +20,8 @@ from src.my_util import parse_tags, my_a2a
 # set max num_steps to solve stuff  max_num_steps = 5
 # change env_config = if I want to change the model
 
+# TODO: Change to [2], [3], [4], [5], [6], [7], [8], etc. to test different tasks
+TAU_TASK_ID = 5 # task ID seems 4 causes a false json return at the moment
 
 # from tau_bench.agents.tool_calling_agent import ToolCallingAgent
 from tau_bench.envs import get_env
@@ -172,14 +174,16 @@ User message: {obs}
                     total_cost=total_cost,
                 )
         except Exception as e:
-            logger.error(f"Error communicating with white agent: {e}")
+            error_msg = f"Communication error with white agent"
+            error_detail = f"Exception: {type(e).__name__}: {str(e)}"
+            logger.error(f"{error_msg}. {error_detail}", exc_info=True)
             if event_queue:
                 await event_queue.enqueue_event(
-                    new_agent_text_message(f"Error at step {step_num + 1}: {str(e)}")
+                    new_agent_text_message(f"Error at step {step_num + 1}: {error_msg}")
                 )
             return SolveResult(
                 reward=0.0,
-                info={**info, "error": str(e), "steps_completed": step_num + 1},
+                info={**info, "error": error_msg, "error_detail": error_detail, "steps_completed": step_num + 1},
                 messages=[],
                 total_cost=total_cost,
             )
@@ -208,9 +212,39 @@ User message: {obs}
         
         # parse the action out
         white_tags = parse_tags(white_text)
+        if "json" not in white_tags:
+            error_msg = f"White agent returned improperly formatted response (missing <json> tags)"
+            error_detail = f"Response preview: {white_text[:300]}"
+            logger.error(f"{error_msg}. {error_detail}")
+            if event_queue:
+                await event_queue.enqueue_event(
+                    new_agent_text_message(f"Error at step {step_num + 1}: White agent response missing <json> tags")
+                )
+            return SolveResult(
+                reward=0.0,
+                info={**info, "error": error_msg, "error_detail": error_detail, "steps_completed": step_num + 1},
+                messages=[],
+                total_cost=total_cost,
+            )
+        
         action_json = white_tags["json"]
-        action_dict = json.loads(action_json)
-        action = Action(**action_dict)
+        try:
+            action_dict = json.loads(action_json)
+            action = Action(**action_dict)
+        except (json.JSONDecodeError, KeyError, TypeError, ValueError) as e:
+            error_msg = "White agent returned invalid JSON format"
+            error_detail = f"JSON parse error: {str(e)}. Content: {action_json[:300]}"
+            logger.error(f"{error_msg}. {error_detail}")
+            if event_queue:
+                await event_queue.enqueue_event(
+                    new_agent_text_message(f"Error at step {step_num + 1}: Invalid JSON in white agent response")
+                )
+            return SolveResult(
+                reward=0.0,
+                info={**info, "error": error_msg, "error_detail": error_detail, "steps_completed": step_num + 1},
+                messages=[],
+                total_cost=total_cost,
+            )
 
         env_response = env.step(action)
         reward = env_response.reward
@@ -286,10 +320,10 @@ class TauGreenAgentExecutor(AgentExecutor):
                 env_config = {
                     "env": "retail",
                     "user_strategy": "llm",
-                    "user_model": "gpt-5",  # Changed to GPT-5
+                    "user_model": "gpt-4o-mini",  # Changed to GPT-4o-mini, can also use gpt-5 instead
                     "user_provider": "openai",
                     "task_split": "test",
-                    "task_ids": [1],
+                    "task_ids": [TAU_TASK_ID], # TODO: Change to [2], [3], [4], [5], [6], [7], [8], etc. to test different tasks
                 }
             else:
                 # JSON but unknown type, try XML parsing
@@ -365,6 +399,67 @@ class TauGreenAgentExecutor(AgentExecutor):
 
         logger.info(f"=== Evaluation complete! Success: {result_bool}, Time: {metrics['time_used']:.2f}s ===")
         
+        # Generate user-friendly failure explanation
+        failure_reason = ""
+        try:
+            if not result_bool and res.info:
+                logger.info("Generating failure reason...")
+                task_info = res.info.get("task", {})
+                reward_info = res.info.get("reward_info")
+                
+                logger.info(f"DEBUG - task_info keys: {list(task_info.keys()) if task_info else 'None'}")
+                logger.info(f"DEBUG - reward_info keys: {list(reward_info.keys()) if reward_info else 'None'}")
+                
+                # Extract what was expected vs what happened
+                expected_outputs = task_info.get("outputs", [])
+                instruction = task_info.get("instruction", "")
+                
+                logger.info(f"DEBUG - expected_outputs: {expected_outputs}")
+                logger.info(f"DEBUG - instruction: {instruction[:100] if instruction else 'None'}")
+                
+                failure_parts = []
+                
+                # Add the task instruction FIRST for context
+                if instruction:
+                    failure_parts.append(f"**Task**: {instruction}")
+                
+                # Check if error occurred (reward_info will be None for errors)
+                if "error" in res.info:
+                    error_msg = res.info.get("error", "Unknown error")
+                    error_detail = res.info.get("error_detail", "")
+                    steps_completed = res.info.get("steps_completed", 0)
+                    failure_parts.append(f"**Error**: {error_msg}")
+                    if error_detail:
+                        failure_parts.append(f"**Details**: {error_detail}")
+                    failure_parts.append(f"**Steps Completed**: {steps_completed}/30")
+                elif reward_info:
+                    # Check for missing outputs
+                    actual_outputs = reward_info.get("info", {}).get("outputs", {})
+                    logger.info(f"DEBUG - actual_outputs: {actual_outputs}")
+                    
+                    if expected_outputs and actual_outputs:
+                        missing_outputs = [out for out, provided in actual_outputs.items() if not provided]
+                        if missing_outputs:
+                            failure_parts.append(f"**Missing Required Outputs**: {', '.join(f'`{o}`' for o in missing_outputs)}")
+                    
+                    # Check reward breakdown
+                    reward_breakdown = reward_info.get("info", {})
+                    if "r_outputs" in reward_breakdown:
+                        output_score = reward_breakdown["r_outputs"]
+                        num_expected = len(expected_outputs) if expected_outputs else 1
+                        failure_parts.append(f"**Output Score**: {output_score}/{num_expected} - Agent did not provide the required information to the user")
+                
+                if failure_parts:
+                    failure_reason = "\n\n".join(failure_parts)
+                else:
+                    failure_reason = "Agent failed to complete the task successfully. Check logs for details."
+                
+                logger.info(f"DEBUG - Generated failure_reason length: {len(failure_reason)}")
+        except Exception as e:
+            logger.error(f"Error generating failure reason: {e}", exc_info=True)
+            failure_reason = f"Agent failed to complete the task. Error details: {str(e)}"
+        
+        # ALWAYS report results to AgentBeats, even if there was an error above
         if battle_id and backend_url:
             logger.info(f"Reporting battle results to AgentBeats: {backend_url}")
             try:
@@ -372,10 +467,17 @@ class TauGreenAgentExecutor(AgentExecutor):
                 async with httpx.AsyncClient() as client:
                     # Use correct AgentBeats API endpoint format
                     report_url = f"{backend_url}/battles/{battle_id}"
+                    
+                    # Create user-friendly message
+                    if result_bool:
+                        message = "✅ **Tau-bench evaluation PASSED!**\n\nWhite agent successfully completed the task."
+                    else:
+                        message = f"❌ **Tau-bench evaluation FAILED**\n\n{failure_reason}"
+                    
                     report_data = {
                         "is_result": True,
-                        "message": f"Tau-bench evaluation completed. White agent {'succeeded' if result_bool else 'failed'}.",
-                        "winner": "green" if result_bool else "red",  # Green wins if white agent passes evaluation
+                        "message": message,
+                        "winner": "white" if result_bool else "green",  # White wins if it passes evaluation, green wins if white fails
                         "timestamp": datetime.utcnow().isoformat() + "Z",
                         "reported_by": "tau_green_agent",
                         "detail": {
@@ -390,13 +492,15 @@ class TauGreenAgentExecutor(AgentExecutor):
                     else:
                         logger.warning(f"Failed to report battle results: {response.status_code} - {response.text}")
             except Exception as e:
-                logger.error(f"Error reporting battle results: {e}")
+                logger.error(f"Error reporting battle results to AgentBeats backend: {e}", exc_info=True)
         
+        logger.info("Sending final result to event queue...")
         await event_queue.enqueue_event(
             new_agent_text_message(
                 f"Finished. White agent success: {result_emoji}\nMetrics: {metrics}\n"
             )
         )  # alternative, impl as a task-generating agent
+        logger.info("Battle execution complete!")
 
     async def cancel(self, context: RequestContext, event_queue: EventQueue) -> None:
         raise NotImplementedError

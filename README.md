@@ -97,13 +97,13 @@ async def execute(self, context: RequestContext, event_queue: EventQueue):
     for step in range(max_num_steps):
         # 1. Send message to white agent
         response = await my_a2a.send_message(white_agent_url, message)
-      
+    
         # 2. Parse response
         action = parse_white_agent_response(response)
-      
+    
         # 3. Execute in environment
         result = env.step(action)
-      
+    
         # 4. Check completion
         if result.done:
             break
@@ -151,7 +151,6 @@ User message: {message}
 
 ## 3. Architecture Overview
 
-
 ```
 -┌─────────────────────────────────────────────────────────────┐
 │ Tau-Bench Environment (External Package)                    │
@@ -179,7 +178,7 @@ User message: {message}
 │  1. Get tools_info + wiki from env                          │
 │  2. Format as text prompt                                   │
 │  3. Send to white agent ─────────────────-──------─┐        │
-│                                                    │        │          
+│                                                    │        │        
 │  4. Receive JSON response ◄──────────────────┐     │        │
 │  5. Parse: action = {"name": "...", ...}     │     │        │
 │  6. Execute: env.step(action)                │     │        │
@@ -187,8 +186,8 @@ User message: {message}
 │  8. Send result back to white agent ─────────┼─────│        │
 │                                              │     │        │
 └──────────────────────────────────────────────┼─────┼─────-──┘
-                                               │     │     
-                                               │     │     
+                                               │     │   
+                                               │     │   
 ┌────────────────────────────────────────────────────────────-──┐
 │ White Agent (Our Code)                       │     │          │
 │                                              │     │          │
@@ -293,11 +292,11 @@ class TauBenchMCPServer:
     def __init__(self, env):
         self.env = env
         self.app = FastAPI()
-      
+    
         @self.app.get("/tools")
         async def list_tools():
             return self.env.tools_info
-      
+    
         @self.app.post("/execute")
         async def execute_tool(tool_call: ToolCall):
             action = Action(name=tool_call.name, kwargs=tool_call.kwargs)

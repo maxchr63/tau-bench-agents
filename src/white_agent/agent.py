@@ -43,8 +43,31 @@ class GeneralWhiteAgentExecutor(AgentExecutor):
     async def execute(self, context: RequestContext, event_queue: EventQueue) -> None:
         # parse the task
         user_input = context.get_user_input()
+        
+        ## Use in case white agent fails again
+
+        # Check if this is a battle_info notification (should be ignored by white agent)
+        try:
+            import json
+            battle_data = json.loads(user_input)
+            if battle_data.get("type") == "battle_info":
+                # This is just a notification, acknowledge and return
+                await event_queue.enqueue_event(
+                    new_agent_text_message("Battle info received, ready for battle", context_id=context.context_id)
+                )
+                return
+        except (json.JSONDecodeError, KeyError, ValueError):
+            # Not JSON or not battle_info, proceed normally
+            pass
+        
         if context.context_id not in self.ctx_id_to_messages:
-            self.ctx_id_to_messages[context.context_id] = []
+            # Initialize with system prompt to enforce JSON format
+            self.ctx_id_to_messages[context.context_id] = [
+                {
+                    "role": "system",
+                    "content": "You are a retail customer service agent. You MUST always respond with your answer wrapped in <json>...</json> tags. Never respond with plain text outside these tags. Follow the JSON format exactly as specified in the user's instructions."
+                }
+            ]
         messages = self.ctx_id_to_messages[context.context_id]
         messages.append(
             {
