@@ -8,11 +8,11 @@ echo "=================================="
 # Check if launchers are running
 echo ""
 echo "Checking if launchers are running..."
-GREEN_RUNNING=$(lsof -i :9110 -t 2>/dev/null)
+GREEN_RUNNING=$(lsof -i :9111 -t 2>/dev/null)
 WHITE_RUNNING=$(lsof -i :9210 -t 2>/dev/null)
 
 if [ -z "$GREEN_RUNNING" ]; then
-    echo "❌ Green launcher is NOT running on port 9110"
+    echo "❌ Green launcher is NOT running on port 9111"
     echo "   Start it: cd $(dirname "$0") && uv run python src/green_launcher.py"
 else
     echo "✅ Green launcher is running (PID: $GREEN_RUNNING)"
@@ -29,14 +29,14 @@ fi
 if [ -n "$GREEN_RUNNING" ]; then
     echo ""
     echo "Testing Green Launcher endpoints..."
-    HEALTH=$(curl -s http://localhost:9110/health 2>/dev/null)
+    HEALTH=$(curl -s http://localhost:9111/health 2>/dev/null)
     if [ -n "$HEALTH" ]; then
         echo "  ✅ Health endpoint: $HEALTH"
     else
         echo "  ❌ Health endpoint failed"
     fi
     
-    STATUS=$(curl -s http://localhost:9110/status 2>/dev/null)
+    STATUS=$(curl -s http://localhost:9111/status 2>/dev/null)
     if [ -n "$STATUS" ]; then
         echo "  ✅ Status endpoint: $STATUS"
     else
@@ -89,7 +89,7 @@ if [ -z "$GREEN_RUNNING" ] || [ -z "$WHITE_RUNNING" ]; then
 else
     echo "1. Register agents in AgentBeats UI:"
     echo "   - White: http://localhost:9004 (Launcher: http://localhost:9210)"
-    echo "   - Green: http://localhost:9003 (Launcher: http://localhost:9110)"
+    echo "   - Green: http://localhost:9003 (Launcher: http://localhost:9111)"
     echo "2. Launch agents via UI or API"
     echo "3. Create and run your evaluation!"
 fi

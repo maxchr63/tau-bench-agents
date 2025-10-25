@@ -1,5 +1,8 @@
 """Green agent implementation - manages assessment and evaluation."""
 
+
+import agentbeats as ab
+
 import uvicorn
 import tomllib
 import dotenv
@@ -39,6 +42,7 @@ logging.basicConfig(
         logging.StreamHandler()
     ]
 )
+
 logger = logging.getLogger("green_agent")
 
 
@@ -378,6 +382,8 @@ class TauGreenAgentExecutor(AgentExecutor):
         #     env=env,
         #     task_index=task_index,
         # )
+
+        
         
         # Get battle info for progress updates
         battle_id = battle_info.get("battle_id")

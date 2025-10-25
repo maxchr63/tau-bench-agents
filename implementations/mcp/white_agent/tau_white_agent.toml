@@ -1,0 +1,21 @@
+name = "tau_white_agent"
+description = "The retail customer service agent being tested by tau-bench."
+version = "0.1.0"
+
+defaultInputModes = ["text"]
+defaultOutputModes = ["text"]
+
+[capabilities]
+streaming = true
+
+[[skills]]
+id = "retail_customer_service"
+name = "Retail Customer Service"
+description = """
+Handle retail customer service requests including orders, returns, exchanges, and account management.
+"""
+tags = ["white agent", "retail", "customer service"]
+examples = ["""
+Hello, I'd like to exchange an item from my recent order #W2378156.
+"""]
+

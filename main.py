@@ -1,11 +1,9 @@
 """CLI entry point for agentify-example-tau-bench."""
 
 import typer
-import asyncio
 
-from src.green_agent import start_green_agent
-from src.white_agent import start_white_agent
-from src.terminal_launcher import launch_evaluation
+from implementations.mcp.green_agent.agent import start_green_agent
+from implementations.mcp.white_agent.agent import start_white_agent
 
 app = typer.Typer(help="Agentified Tau-Bench - Standardized agent assessment framework")
 
@@ -20,12 +18,6 @@ def green():
 def white():
     """Start the white agent (target being tested)."""
     start_white_agent()
-
-
-@app.command()
-def launch():
-    """Launch the complete evaluation workflow."""
-    asyncio.run(launch_evaluation())
 
 
 if __name__ == "__main__":

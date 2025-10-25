@@ -1,0 +1,36 @@
+name = "tau_green_agent_mcp"
+description = "The assessment hosting agent for tau-bench (refactored with AgentBeats SDK)."
+version = "0.1.0"
+
+defaultInputModes = ["text"]
+defaultOutputModes = ["text"]
+[capabilities]
+streaming = true
+
+[[skills]]
+id = "host_assess_tau_bench"
+name = "Tau-bench assessment hosting"
+description = """
+Assess the tool-calling ability of an agent.
+"""
+tags = ["green agent", "assessment hosting", "tau-bench"]
+examples = ["""    
+Your task is to instantiate tau-bench to test the agent located at:
+<white_agent_url>
+http://localhost:9004/
+</white_agent_url>
+You should use the following env configuration:
+<env_config>
+{
+  "env": "retail",
+  "user_strategy": "llm",
+  "user_strategy": "llm",
+  "user_model": "claude-haiku-4-5-20251001",  # ← Faster, cheaper
+  "user_provider": "anthropic",                
+  "task_split": "test",
+  "task_ids": [
+    1
+  ]
+}
+</env_config>
+    """]
