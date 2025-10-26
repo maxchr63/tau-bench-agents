@@ -1,0 +1,49 @@
+[scenario]
+name = "tau-bench-pass-k"
+description = "Tau-bench pass@k evaluation scenario"
+version = "1.0.0"
+
+# No external services needed for tau-bench
+# (tau-bench runs internally in the green agent)
+
+# Agents to be launched
+[[agents]]
+name = "Tau Green Agent (MCP)"
+card = "green_agent/tau_green_agent_mcp.toml"
+launcher_host = "0.0.0.0"
+launcher_port = 9111
+agent_host = "0.0.0.0"
+agent_port = 9006
+backend = "http://localhost:9000"
+model_type = "openai"
+model_name = "gpt-4o-mini"
+tools = ["green_agent/tools.py"]
+mcp_servers = []
+is_green = true
+
+# Define participant requirement for white agent
+[[agents.participant_requirements]]
+role = "white_agent"
+name = "white_agent_requirement"
+required = true
+participant_agent = "Tau White Agent (MCP)"
+
+[[agents]]
+name = "Tau White Agent (MCP)"
+card = "white_agent/tau_white_agent.toml"
+launcher_host = "0.0.0.0"
+launcher_port = 9211
+agent_host = "0.0.0.0"
+agent_port = 9210
+backend = "http://localhost:9000"
+model_type = "openai"
+model_name = "gpt-4o-mini"
+tools = []
+mcp_servers = []
+
+# Launch configuration
+[launch]
+mode = "tmux"  # Options: "tmux", "separate", "current"
+tmux_session_name = "tau-bench-pass-k"
+startup_interval = 2  # seconds between launching each component
+wait_for_services = false  # no external services

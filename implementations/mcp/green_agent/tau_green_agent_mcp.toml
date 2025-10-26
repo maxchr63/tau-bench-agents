@@ -1,11 +1,20 @@
 name = "tau_green_agent_mcp"
 description = "The assessment hosting agent for tau-bench (refactored with AgentBeats SDK)."
 version = "0.1.0"
+battle_timeout = 1050
 
 defaultInputModes = ["text"]
 defaultOutputModes = ["text"]
 [capabilities]
 streaming = true
+
+# Pass@k evaluation configuration
+[pass_k_config]
+mode = "manual"           # "manual" or "random"
+k = 4                     # Number of attempts per task (must be even for k/2 calculation)
+domain = "retail"         # For manual mode: "retail" or "airline"
+task_id = 1               # For manual mode: specific task to test (0-based index)
+num_battles = 5           # For random mode: how many different random tasks to test
 
 [[skills]]
 id = "host_assess_tau_bench"
@@ -24,13 +33,13 @@ You should use the following env configuration:
 {
   "env": "retail",
   "user_strategy": "llm",
-  "user_strategy": "llm",
-  "user_model": "claude-haiku-4-5-20251001",  # ← Faster, cheaper
-  "user_provider": "anthropic",                
+  "user_model": "USE_PROVIDER config in tools.py controls this",
+  "user_provider": "Automatically set based on USE_PROVIDER",
   "task_split": "test",
-  "task_ids": [
-    1
-  ]
+  "task_ids": [5]
 }
 </env_config>
+
+Note: LLM provider is controlled by USE_PROVIDER in green_agent/tools.py
+Currently set to: openrouter (using openai/gpt-5-nano)
     """]

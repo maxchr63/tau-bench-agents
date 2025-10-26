@@ -7,18 +7,7 @@ An MCP-ready implementation of τ-bench integration for AgentBeats, featuring mo
 ## 🚀 Quick Start
 
 ```bash
-# 1. Install dependencies
-cd ~/tau-bench-agents
-uv sync
-
-# 2. Test the MCP tools
-uv run python test_refactored_tools.py
-
-# 3. Start MCP agents
-./scripts/start_mcp.sh
-
-# 4. Verify agents are running
-./check_status.sh
+w 
 ```
 
 ---

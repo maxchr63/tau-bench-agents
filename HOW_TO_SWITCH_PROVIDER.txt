@@ -1,0 +1,16 @@
+============================================
+HOW TO SWITCH LLM PROVIDER
+============================================
+
+Edit this line in implementations/mcp/green_agent/tools.py (line 25):
+
+    USE_PROVIDER = "openrouter"  # <-- CHANGE THIS
+
+Options:
+  - "openrouter" = Use OpenRouter (no rate limits, needs OPENROUTER_API_KEY in .env)
+  - "openai" = Use OpenAI (default, needs OPENAI_API_KEY in .env)
+
+Then restart:
+    ./scripts/start_mcp.sh
+
+That's it!

@@ -1,6 +1,20 @@
 #!/bin/bash
 cd "$(dirname "$0")/.."
 
+# Load .env file if it exists
+if [ -f ".env" ]; then
+    echo "📄 Loading .env file..."
+    export $(grep -v '^#' .env | xargs)
+fi
+
+# Show LLM provider configuration
+if [ "$LLM_PROVIDER" = "openrouter" ]; then
+    echo "🤖 Using OpenRouter (model: ${OPENROUTER_MODEL:-openai/gpt-4o-mini})"
+else
+    echo "🤖 Using OpenAI (default)"
+fi
+echo ""
+
 echo "🔄 Cleaning up old processes..."
 pkill -f 'python.*launcher' 2>/dev/null
 for port in 9003 9004 9006 9110 9111 9210; do 

@@ -324,7 +324,7 @@ class TauGreenAgentExecutor(AgentExecutor):
                 env_config = {
                     "env": "retail",
                     "user_strategy": "llm",
-                    "user_model": "gpt-4o-mini",  # Changed to GPT-4o-mini, can also use gpt-5 instead
+                    "user_model": "gpt-5-mini",  # Changed to GPT-4o-mini, can also use gpt-5 instead
                     "user_provider": "openai",
                     "task_split": "test",
                     "task_ids": [TAU_TASK_ID], # TODO: Change to [2], [3], [4], [5], [6], [7], [8], etc. to test different tasks

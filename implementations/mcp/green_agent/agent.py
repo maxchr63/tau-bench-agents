@@ -1,16 +1,23 @@
 """Green agent implementation - manages assessment and evaluation.
 
-REFACTORED VERSION using AgentBeats SDK patterns and tools.
+VERSION using AgentBeats SDK patterns and tools.
 """
+
+# CRITICAL: Import shared config FIRST to configure LiteLLM before anything else!
+import sys
+from pathlib import Path
+_project_root = str(Path(__file__).parent.parent.parent)
+if _project_root not in sys.path:
+    sys.path.insert(0, _project_root)
+from implementations.mcp.shared_config import USE_PROVIDER, TAU_USER_MODEL, TAU_USER_PROVIDER
+print(f"[GREEN AGENT STARTUP] Loaded config: Provider={USE_PROVIDER}, Model={TAU_USER_MODEL}")
 
 import agentbeats as ab
 import uvicorn
 import tomllib
 import dotenv
 import json
-import time
 import logging
-from pathlib import Path
 
 from a2a.server.apps import A2AStarletteApplication
 from a2a.server.request_handlers import DefaultRequestHandler
@@ -20,7 +27,6 @@ from a2a.server.tasks import InMemoryTaskStore
 from a2a.types import AgentCard, SendMessageSuccessResponse, Message
 from a2a.utils import new_agent_text_message, get_text_parts
 
-from tau_bench.envs import get_env
 from tau_bench.types import SolveResult, RESPOND_ACTION_NAME, Action
 
 # Import our new tools (local to this implementation)
@@ -66,7 +72,7 @@ async def evaluate_agent_with_tau_bench(
     """
     Evaluate white agent using tau-bench environment.
 
-    This is a refactored version using AgentBeats SDK utilities.
+    This is a mcp-ready version using AgentBeats SDK utilities.
     """
     # Set up battle context if provided
     if battle_id and backend_url:
@@ -282,12 +288,32 @@ User message:
 class TauGreenAgentExecutor(AgentExecutor):
     """
     Green agent executor for tau-bench evaluations.
-
-    REFACTORED VERSION using AgentBeats SDK patterns.
+    
+    VERSION using AgentBeats SDK patterns with pass@k support.
     """
 
-    def __init__(self):
-        pass
+    def __init__(self, agent_card_path: str = "tau_green_agent_mcp"):
+        """Initialize executor and load pass@k config from TOML."""
+        import tomllib
+
+        current_dir = Path(__file__).parent
+        toml_path = current_dir / f"{agent_card_path}.toml"
+
+        with open(toml_path, "rb") as f:
+            config = tomllib.load(f)
+
+        self.pass_k_config = config.get("pass_k_config", {
+            "mode": "manual",
+            "k": 4,
+            "domain": "retail",
+            "task_id": 5,
+            "num_battles": 5
+        })
+        
+        # Track active battles to prevent duplicate processing
+        self.active_battles = set()  # Set of battle_ids currently being processed
+
+        logger.info(f"Loaded pass@k config: {self.pass_k_config}")
 
     async def execute(self, context: RequestContext, event_queue: EventQueue) -> None:
         logger.info("=== Green agent received task ===")
@@ -298,9 +324,11 @@ class TauGreenAgentExecutor(AgentExecutor):
         try:
             battle_info = json.loads(user_input)
             msg_type = battle_info.get("type")
+            battle_id = battle_info.get("battle_id")
 
             if msg_type == "battle_info":
                 # Just a notification, acknowledge and return
+                # Don't add to active set yet - wait for battle_start
                 logger.info("Received battle_info notification, acknowledging")
                 await event_queue.enqueue_event(
                     new_agent_text_message("Battle info received, ready for battle start")
@@ -308,6 +336,18 @@ class TauGreenAgentExecutor(AgentExecutor):
                 return
 
             elif msg_type == "battle_start":
+                # Check for duplicate battle_start request
+                if battle_id and battle_id in self.active_battles:
+                    logger.info(f"⚠️  Duplicate battle_start for {battle_id} - already processing, returning acknowledgment")
+                    await event_queue.enqueue_event(
+                        new_agent_text_message(f"Battle {battle_id} already in progress")
+                    )
+                    return
+                
+                # Mark battle as active NOW (when we're actually starting work)
+                if battle_id:
+                    self.active_battles.add(battle_id)
+                    logger.info(f"✅ Added battle {battle_id} to active set, starting evaluation")
                 # AgentBeats battle start format
                 logger.info("Received battle_start message")
                 opponent_infos = battle_info.get("opponent_infos", [])
@@ -320,8 +360,8 @@ class TauGreenAgentExecutor(AgentExecutor):
                 env_config = {
                     "env": "retail",
                     "user_strategy": "llm",
-                    "user_model": "gpt-4o-mini",
-                    "user_provider": "openai",
+                    "user_model": green_tools.TAU_USER_MODEL,
+                    "user_provider": green_tools.TAU_USER_PROVIDER,
                     "task_split": "test",
                     "task_ids": [TAU_TASK_ID],
                 }
@@ -337,129 +377,168 @@ class TauGreenAgentExecutor(AgentExecutor):
             battle_info = {}  # No battle info in this case
 
         logger.info(f"Using white_agent_url: {white_agent_url}")
-        logger.info(f"Using env_config: {env_config}")
-
-        # Set up tau-bench environment
-        logger.info("Setting up tau-bench environment...")
-        await event_queue.enqueue_event(
-            new_agent_text_message("Setting up tau-bench environment...")
-        )
-
-        assert len(env_config["task_ids"]) == 1, "Only single task supported"
-        task_index = env_config["task_ids"][0]
-
-        env = get_env(
-            env_name=env_config["env"],
-            user_strategy=env_config["user_strategy"],
-            user_model=env_config["user_model"],
-            task_split=env_config["task_split"],
-            user_provider=env_config.get("user_provider", None),
-            task_index=task_index,
-        )
-
-        metrics = {}
-
-        logger.info(f"Starting evaluation of white agent at {white_agent_url}")
-        await event_queue.enqueue_event(
-            new_agent_text_message(f"Starting evaluation of white agent at {white_agent_url}...")
-        )
-
-        timestamp_started = time.time()
 
         # Get battle info for progress updates
         battle_id = battle_info.get("battle_id")
         backend_url = battle_info.get("backend_url") or battle_info.get("green_battle_context", {}).get("backend_url")
 
-        # Run evaluation using our refactored function
-        res = await evaluate_agent_with_tau_bench(
-            white_agent_url,
-            env,
-            task_index,
-            event_queue,
-            max_num_steps=30,
-            battle_id=battle_id,
-            backend_url=backend_url
+        # Determine evaluation mode and task selection
+        mode = self.pass_k_config.get("mode", "manual")
+        k = self.pass_k_config.get("k", 4)
+
+        logger.info(f"Pass@k evaluation mode: {mode}, k={k}")
+        await event_queue.enqueue_event(
+            new_agent_text_message(f"🎯 Pass@k evaluation mode: {mode} (k={k})")
         )
 
-        metrics["time_used"] = time.time() - timestamp_started
-        result_bool = metrics["success"] = res.reward == 1
-        result_emoji = "✅" if result_bool else "❌"
+        if mode == "manual":
+            # Manual mode: Use config from TOML
+            domain = self.pass_k_config.get("domain", "retail")
+            task_id = self.pass_k_config.get("task_id", 5)
+            tasks_to_evaluate = [(domain, task_id)]
 
-        logger.info(f"=== Evaluation complete! Success: {result_bool}, Time: {metrics['time_used']:.2f}s ===")
+            logger.info(f"Manual mode: Evaluating domain={domain}, task_id={task_id}")
+            await event_queue.enqueue_event(
+                new_agent_text_message(f"📋 Manual mode: {domain} task {task_id}")
+            )
 
-        # Generate user-friendly failure explanation
-        failure_reason = ""
-        if not result_bool and res.info:
-            logger.info("Generating failure reason...")
-            task_info = res.info.get("task", {})
-            reward_info = res.info.get("reward_info")
+        elif mode == "random":
+            # Random mode: Generate random task selections
+            import random
 
-            failure_parts = []
+            num_battles = self.pass_k_config.get("num_battles", 5)
+            domains = ["retail", "airline"]
+            task_range = list(range(10))  # Assuming 10 tasks per domain
 
-            # Add task instruction first for context
-            instruction = task_info.get("instruction", "")
-            if instruction:
-                failure_parts.append(f"**Task**: {instruction}")
+            tasks_to_evaluate = [
+                (random.choice(domains), random.choice(task_range))
+                for _ in range(num_battles)
+            ]
 
-            # Check if error occurred
-            if "error" in res.info:
-                error_msg = res.info.get("error", "Unknown error")
-                error_detail = res.info.get("error_detail", "")
-                steps_completed = res.info.get("steps_completed", 0)
-                failure_parts.append(f"**Error**: {error_msg}")
-                if error_detail:
-                    failure_parts.append(f"**Details**: {error_detail}")
-                failure_parts.append(f"**Steps Completed**: {steps_completed}/30")
-            elif reward_info:
-                # Check for missing outputs
-                actual_outputs = reward_info.get("info", {}).get("outputs", {})
-                expected_outputs = task_info.get("outputs", [])
+            logger.info(f"Random mode: Generated {num_battles} random tasks")
+            await event_queue.enqueue_event(
+                new_agent_text_message(
+                    f"🎲 Random mode: {num_battles} random tasks\n" +
+                    "\n".join([f"  - {d} task {t}" for d, t in tasks_to_evaluate])
+                )
+            )
 
-                if expected_outputs and actual_outputs:
-                    missing_outputs = [out for out, provided in actual_outputs.items() if not provided]
-                    if missing_outputs:
-                        failure_parts.append(f"**Missing Required Outputs**: {', '.join(f'`{o}`' for o in missing_outputs)}")
+        else:
+            raise ValueError(f"Unknown evaluation mode: {mode}")
 
-                # Check reward breakdown
-                reward_breakdown = reward_info.get("info", {})
-                if "r_outputs" in reward_breakdown:
-                    output_score = reward_breakdown["r_outputs"]
-                    num_expected = len(expected_outputs) if expected_outputs else 1
-                    failure_parts.append(f"**Output Score**: {output_score}/{num_expected} - Agent did not provide the required information")
+        # Run pass@k evaluation on selected tasks
+        all_results = []
 
-            if failure_parts:
-                failure_reason = "\n\n".join(failure_parts)
-            else:
-                failure_reason = "Agent failed to complete the task successfully. Check logs for details."
+        for idx, (domain, task_id) in enumerate(tasks_to_evaluate):
+            logger.info(f"\n{'='*60}")
+            logger.info(f"Evaluating {idx + 1}/{len(tasks_to_evaluate)}: {domain} task {task_id}")
+            logger.info(f"{'='*60}\n")
 
-        # Report results using AgentBeats SDK
-        if battle_id and backend_url:
-            logger.info("Reporting battle results to AgentBeats...")
+            await event_queue.enqueue_event(
+                new_agent_text_message(
+                    f"\n--- Task {idx + 1}/{len(tasks_to_evaluate)}: {domain} task {task_id} ---"
+                )
+            )
 
-            if result_bool:
-                message = "✅ **Tau-bench evaluation PASSED!**\n\nWhite agent successfully completed the task."
-            else:
-                message = f"❌ **Tau-bench evaluation FAILED**\n\n{failure_reason}"
-
-            await green_tools.report_battle_result(
-                success=result_bool,
-                message=message,
-                metrics={
-                    **metrics,
-                    "reward": res.reward,
-                    "info": res.info
-                },
+            # Run pass@k evaluation using our tool
+            results = await green_tools.evaluate_agent_with_pass_k(
+                white_agent_url=white_agent_url,
+                domain=domain,
+                task_id=task_id,
+                k=k,
+                max_num_steps=30,
                 battle_id=battle_id,
                 backend_url=backend_url
             )
 
-        logger.info("Sending final result to event queue...")
-        await event_queue.enqueue_event(
-            new_agent_text_message(
-                f"Finished. White agent success: {result_emoji}\nMetrics: {metrics}\n"
+            all_results.append(results)
+
+        # Generate aggregate summary across all evaluated tasks
+        logger.info("\n" + "="*60)
+        logger.info("PASS@K EVALUATION SUMMARY")
+        logger.info("="*60)
+
+        total_tasks = len(all_results)
+        overall_pass_k = sum(r["pass_k"] for r in all_results) / total_tasks if total_tasks > 0 else 0
+        overall_pass_k_half = sum(r["pass_k_half"] for r in all_results) / total_tasks if total_tasks > 0 else 0
+        overall_success_rate = sum(r["success_rate"] for r in all_results) / total_tasks if total_tasks > 0 else 0
+
+        logger.info(f"Tasks evaluated: {total_tasks}")
+        logger.info(f"Overall pass^{k}: {overall_pass_k:.1%}")
+        logger.info(f"Overall pass^{k//2}: {overall_pass_k_half:.1%}")
+        logger.info(f"Overall success rate: {overall_success_rate:.1%}")
+
+        # Send final summary to event queue
+        summary_lines = [
+            "\n" + "="*60,
+            "🏁 PASS@K EVALUATION COMPLETE",
+            "="*60,
+            f"\n**Tasks Evaluated**: {total_tasks}",
+            f"**Mode**: {mode}",
+            f"**Attempts per task (k)**: {k}",
+            "",
+            "## Overall Results",
+            f"- **pass^{k}**: {overall_pass_k:.1%} ({sum(r['pass_k'] for r in all_results)}/{total_tasks} tasks)",
+            f"- **pass^{k//2}**: {overall_pass_k_half:.1%} ({sum(r['pass_k_half'] for r in all_results)}/{total_tasks} tasks)",
+            f"- **Success Rate**: {overall_success_rate:.1%}",
+            "",
+            "## Per-Task Summary"
+        ]
+
+        for idx, result in enumerate(all_results):
+            pass_k_emoji = "✅" if result["pass_k"] else "❌"
+            summary_lines.append(
+                f"{idx + 1}. {result['domain']} task {result['task_id']}: "
+                f"{pass_k_emoji} pass^{k}={result['pass_k']}, "
+                f"success_rate={result['success_rate']:.0%}"
             )
+
+        await event_queue.enqueue_event(
+            new_agent_text_message("\n".join(summary_lines))
         )
-        logger.info("Battle execution complete!")
+
+        # Mark battle as complete in AgentBeats
+        # Determine winner: white agent wins if pass@k > 0, otherwise tau-bench (green) wins
+        winner = "white_agent" if overall_pass_k > 0 else "tau_green_agent_mcp"
+        
+        # Only record result if we have battle context
+        if battle_id and backend_url:
+            battle_context = ab.BattleContext(
+                battle_id=battle_id,
+                backend_url=backend_url,
+                agent_name="tau_green_agent_mcp"
+            )
+            
+            ab.record_battle_result(
+                battle_context,
+                message=f"✅ Pass@k evaluation complete: {overall_pass_k:.1%} pass^{k}, {overall_success_rate:.1%} success rate",
+                winner=winner,
+                detail={
+                    "overall_pass_k": overall_pass_k,
+                    "overall_pass_k_half": overall_pass_k_half,
+                    "overall_success_rate": overall_success_rate,
+                    "total_tasks": total_tasks,
+                    "k": k,
+                    "mode": mode,
+                    "results": all_results,
+                    "winner_rationale": f"White agent achieved {overall_pass_k:.1%} pass^{k} success rate" if overall_pass_k > 0 else "White agent failed all pass@k evaluations"
+                }
+            )
+            logger.info(f"Battle result recorded to AgentBeats. Winner: {winner}")
+            
+            # Clean up: Remove battle from active set
+            if battle_id in self.active_battles:
+                self.active_battles.remove(battle_id)
+                logger.info(f"✅ Removed battle {battle_id} from active set")
+        else:
+            logger.info(f"No battle context - skipping AgentBeats result recording. Winner would be: {winner}")
+            
+            # Still clean up if we have a battle_id
+            if battle_id and battle_id in self.active_battles:
+                self.active_battles.remove(battle_id)
+                logger.info(f"✅ Removed battle {battle_id} from active set")
+
+        logger.info(f"Pass@k evaluation complete! Winner: {winner}")
 
     async def cancel(self, context: RequestContext, event_queue: EventQueue) -> None:
         raise NotImplementedError
@@ -474,9 +553,9 @@ def start_green_agent(agent_name="tau_green_agent_mcp", host="localhost", port=9
     """
     Start the green agent server.
 
-    REFACTORED VERSION using AgentBeats SDK patterns.
+    VERSION using AgentBeats SDK patterns.
     """
-    print("Starting green agent (refactored version)...")
+    print("Starting green agent (mcp ready version)...")
     agent_card_dict = load_agent_card_toml(agent_name)
     url = f"http://{host}:{port}"
     agent_card_dict["url"] = url

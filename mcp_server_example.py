@@ -25,7 +25,7 @@ class TauBenchMCPServer:
     MCP Server exposing tau-bench evaluation tools.
 
     This server makes tau-bench tools available to any MCP-compatible client,
-    including Claude Desktop, other agents, or custom applications.
+     other agents, or custom applications.
     """
 
     def __init__(self):
