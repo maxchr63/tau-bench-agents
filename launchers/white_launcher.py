@@ -91,11 +91,13 @@ async def launch():
         "uv", "run", "python", "main.py", "white"
     ]
     
+    # IMPORTANT: Do NOT PIPE stdout/stderr without draining them. It can deadlock when buffers fill.
+    # Let the child inherit the parent's stdio or redirect to files.
     agent_process = subprocess.Popen(
         cmd,
         cwd=project_root,
-        stdout=subprocess.PIPE,
-        stderr=subprocess.PIPE,
+        stdout=None,
+        stderr=None,
         env={**os.environ}
     )
     
@@ -152,11 +154,12 @@ async def reset(request: dict):
     project_root = Path(__file__).parent.parent
     cmd = ["uv", "run", "python", "main.py", "white"]
     
+    # IMPORTANT: Do NOT PIPE stdout/stderr without draining them. It can deadlock when buffers fill.
     agent_process = subprocess.Popen(
         cmd,
         cwd=project_root,
-        stdout=subprocess.PIPE,
-        stderr=subprocess.PIPE,
+        stdout=None,
+        stderr=None,
         env={**os.environ}
     )
     

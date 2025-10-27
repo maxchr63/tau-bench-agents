@@ -9,6 +9,7 @@ These tools can be used directly by agents or exposed through MCP servers.
 import json
 import logging
 import os
+import sys
 from typing import Dict, Any, Optional, TYPE_CHECKING
 
 # ============================================================================
@@ -24,6 +25,7 @@ from tau_bench.types import RESPOND_ACTION_NAME, Action
 
 # Import AgentCard for type annotation
 from a2a.types import AgentCard
+import httpx  # Pre-import httpx to avoid per-call import overhead/hangs
 
 if TYPE_CHECKING:
     import httpx
@@ -42,12 +44,10 @@ _card_cache_url: Optional[str] = None
 def _get_httpx_client(timeout: float = 120.0) -> "httpx.AsyncClient":
     """
     Create a FRESH httpx client for each call.
-    
+
     CRITICAL: Do NOT reuse clients! Stale connections cause hanging.
     Each evaluation attempt gets a fresh client to avoid connection state issues.
     """
-    import httpx
-    
     # ALWAYS create a fresh client - no global caching!
     # Reusing clients leads to stale/CLOSED connections that hang indefinitely
     limits = httpx.Limits(
@@ -58,10 +58,11 @@ def _get_httpx_client(timeout: float = 120.0) -> "httpx.AsyncClient":
     client = httpx.AsyncClient(
         timeout=httpx.Timeout(timeout, connect=10.0),  # Explicit connect timeout
         limits=limits,
-        http2=False  # Disable HTTP/2 to avoid protocol issues
+        http2=False,  # Disable HTTP/2 to avoid protocol issues
+        trust_env=False  # Ignore env proxies/netrc to avoid surprises
     )
     logger.info(f"[DEBUG] Created FRESH httpx client (timeout={timeout}s)")
-    
+
     return client
 
 
@@ -91,7 +92,7 @@ async def send_message_to_white_agent(
     try:
         from a2a.client import A2AClient, A2ACardResolver
         from a2a.types import (
-            AgentCard, Message, Part, TextPart, Role,
+            Message, Part, TextPart, Role,
             SendMessageRequest, MessageSendParams
         )
         from uuid import uuid4
@@ -100,9 +101,9 @@ async def send_message_to_white_agent(
         logger.info(f"[DEBUG send_message] Starting - timeout={timeout}s, context_id={context_id}")
 
         # CRITICAL: Use FRESH httpx client for each call to avoid stale connections
-        logger.info("[DEBUG send_message] Getting httpx client...")
+        logger.info("[DEBUG send_message] Creating fresh httpx client...")
         httpx_client = _get_httpx_client(timeout)
-        
+
         try:
             # Use cached agent card if available for same URL
             global _cached_agent_card, _card_cache_url
@@ -117,7 +118,7 @@ async def send_message_to_white_agent(
                 try:
                     # Add aggressive timeout for card fetch (this sometimes hangs!)
                     card = await asyncio.wait_for(
-                        resolver.get_agent_card(relative_card_path="/.well-known/agent.json"),
+                        resolver.get_agent_card(relative_card_path="/.well-known/agent-card.json"),
                         timeout=5.0  # 5 second timeout for card fetch
                     )
                     logger.info("[DEBUG send_message] Agent card fetched successfully")
@@ -149,11 +150,16 @@ async def send_message_to_white_agent(
             request_id = uuid4().hex
             req = SendMessageRequest(id=request_id, params=params)
 
+            logger.info(f"[A2A] >>> Sending message to white agent: msg_len={len(message)}, context={context_id}")
+            print(f"[Green Agent A2A] >>> Sending A2A message to white agent: msg_len={len(message)}, context={context_id}", file=sys.stderr, flush=True)
             logger.info("[DEBUG send_message] Calling client.send_message() - THIS IS WHERE IT MIGHT HANG...")
+
             # Add asyncio.wait_for to enforce timeout at the asyncio level
             try:
                 response = await asyncio.wait_for(client.send_message(request=req), timeout=timeout)
                 logger.info("[DEBUG send_message] client.send_message() returned successfully!")
+                logger.info(f"[A2A] <<< Received response: {type(response).__name__}")
+                print(f"[Green Agent A2A] <<< Received A2A response: {type(response).__name__}", file=sys.stderr, flush=True)
             except asyncio.TimeoutError:
                 logger.error(f"[DEBUG send_message] ASYNCIO TIMEOUT after {timeout}s!")
                 raise TimeoutError(f"Message send timeout after {timeout}s")
@@ -164,7 +170,7 @@ async def send_message_to_white_agent(
                 "context_id": context_id,
                 "message_id": request_id
             }
-        
+
         finally:
             # CRITICAL: Always close the httpx client to prevent stale connections
             await httpx_client.aclose()
@@ -177,18 +183,22 @@ async def send_message_to_white_agent(
         # Enhanced error detection with actionable advice
         if "429" in error_msg or "rate" in error_msg.lower() or "quota" in error_msg.lower():
             logger.error(f"🚫 RATE LIMIT ERROR: {error_type}: {error_msg}")
-            logger.error(f"💡 TIP: Switch to OpenRouter to avoid rate limits:")
-            logger.error(f"   export OPENROUTER_API_KEY='your-key'")
-            logger.error(f"   source ./scripts/use_openrouter.sh")
+            logger.error("💡 TIP: Switch to OpenRouter to avoid rate limits:")
+            logger.error("   export OPENROUTER_API_KEY='your-key'")
+            logger.error("   source ./scripts/use_openrouter.sh")
         elif "timeout" in error_type.lower() or "TimeoutError" in error_type:
             logger.error(f"⏱️  TIMEOUT ERROR: {error_type}: {error_msg}")
             logger.error(f"💡 TIP: The white agent took too long to respond (>{timeout}s)")
         elif "401" in error_msg or "unauthorized" in error_msg.lower():
             logger.error(f"🔑 AUTH ERROR: {error_type}: {error_msg}")
-            logger.error(f"💡 TIP: Check your API key is set correctly")
-            if LLM_PROVIDER == "openrouter":
-                logger.error(f"   Current provider: OpenRouter")
-                logger.error(f"   Key set: {'Yes' if OPENROUTER_API_KEY else 'No'}")
+            logger.error("💡 TIP: Check your API key is set correctly")
+            try:
+                from implementations.mcp.shared_config import TAU_USER_PROVIDER as _PROVIDER  # type: ignore
+            except Exception:
+                _PROVIDER = None
+            if (_PROVIDER or "").lower() == "openrouter":
+                logger.error("   Current provider: OpenRouter")
+                logger.error(f"   Key set: {'Yes' if os.environ.get('OPENROUTER_API_KEY') else 'No'}")
         else:
             logger.error(f"[DEBUG send_message] ERROR: {error_type}: {error_msg}", exc_info=True)
 
@@ -197,6 +207,110 @@ async def send_message_to_white_agent(
             "error": error_msg,
             "error_type": error_type
         }
+
+
+@ab.tool
+async def reset_white_agent(white_agent_url: str, timeout: float = 30.0) -> Dict[str, Any]:
+    """
+    Reset the white agent's memory state by restarting it via the launcher.
+    This ensures complete memory isolation between evaluation attempts.
+
+    Args:
+        white_agent_url: URL of the white agent (e.g., http://localhost:9004)
+        timeout: Timeout in seconds
+
+    Returns:
+        Dict with success status and message
+    """
+    global _cached_agent_card, _card_cache_url
+    
+    try:
+        logger.info(f"[RESET] >>> Resetting white agent at {white_agent_url}")
+        print(f"[Green Agent RESET] >>> Resetting white agent at {white_agent_url}", file=sys.stderr, flush=True)
+        
+        # Extract host and port from URL
+        import re
+        match = re.match(r'https?://([^:]+):(\d+)', white_agent_url)
+        if not match:
+            logger.error(f"[RESET] Invalid white_agent_url format: {white_agent_url}")
+            return {"success": False, "error": "Invalid URL format"}
+        
+        host, port = match.groups()
+        
+        # White agent launcher is on port 9210
+        launcher_url = f"http://{host}:9210"
+
+        httpx_client = _get_httpx_client(timeout)
+        try:
+            # Step 1: Terminate the white agent
+            logger.info(f"[RESET] Terminating white agent via {launcher_url}/terminate")
+            print("[RESET] Terminating white agent...", file=sys.stderr, flush=True)
+            terminate_response = await httpx_client.post(
+                f"{launcher_url}/terminate",
+                timeout=timeout
+            )
+            logger.info(f"[RESET] Terminate response: {terminate_response.status_code}")
+            
+            # Step 2: Wait a moment for clean shutdown
+            import asyncio
+            await asyncio.sleep(1.0)
+            
+            # Step 3: Relaunch the white agent
+            logger.info(f"[RESET] Relaunching white agent via {launcher_url}/launch")
+            print("[RESET] Relaunching white agent...", file=sys.stderr, flush=True)
+            launch_response = await httpx_client.post(
+                f"{launcher_url}/launch",
+                timeout=timeout
+            )
+            
+            if launch_response.status_code == 200:
+                logger.info("[RESET] <<< White agent restarted successfully")
+                print("[RESET] <<< White agent restarted successfully", file=sys.stderr, flush=True)
+                
+                # Wait for agent to be fully ready by probing the new agent card endpoint
+                # Retry for up to `timeout` seconds with small backoff
+                ready = False
+                start = asyncio.get_event_loop().time()
+                probe_path = "/.well-known/agent-card.json"
+                last_err = None
+                while (asyncio.get_event_loop().time() - start) < timeout:
+                    try:
+                        resp = await httpx_client.get(f"{white_agent_url}{probe_path}", timeout=5.0)
+                        if resp.status_code == 200:
+                            ready = True
+                            break
+                        else:
+                            last_err = f"status={resp.status_code}"
+                    except Exception as pe:
+                        last_err = str(pe)
+                    await asyncio.sleep(0.5)
+                if not ready:
+                    logger.warning(f"[RESET] White agent readiness probe failed within {timeout}s (last_err={last_err})")
+                
+                # Clear agent card cache to force refetch
+                _cached_agent_card = None
+                _card_cache_url = None
+                logger.info("[RESET] Cleared agent card cache")
+                
+                return {"success": True, "message": "White agent restarted successfully"}
+            else:
+                logger.error(f"[RESET] Launch failed with status {launch_response.status_code}")
+                return {"success": False, "error": f"Launch returned {launch_response.status_code}"}
+                
+        except Exception as e:
+            logger.error(f"[RESET] Failed to restart white agent: {e}")
+            print(f"[RESET] Failed to restart white agent: {e}", file=sys.stderr, flush=True)
+            # Even if restart fails, clear the cache
+            _cached_agent_card = None
+            _card_cache_url = None
+            return {"success": False, "error": str(e)}
+        finally:
+            await httpx_client.aclose()
+            
+    except Exception as e:
+        logger.error(f"[RESET] XXX Reset failed: {e}")
+        print(f"[RESET] XXX Reset failed: {e}", file=sys.stderr, flush=True)
+        return {"success": False, "error": str(e)}
 
 
 # ============================================================================
@@ -727,6 +841,7 @@ async def evaluate_agent_with_pass_k(
     task_id: int,
     k: int = 4,
     max_num_steps: int = 30,
+    reset_between_attempts: bool = True,
     battle_id: Optional[str] = None,
     backend_url: Optional[str] = None
 ) -> Dict[str, Any]:
@@ -788,6 +903,22 @@ async def evaluate_agent_with_pass_k(
         logger.info(f"--- Attempt {attempt_num + 1}/{k} ---")
         logger.info(f"[DEBUG] ========== ATTEMPT {attempt_num + 1}/{k} STARTING ==========")
 
+        # Optionally reset white agent to prevent state pollution (safer to rely on new context_id)
+        if reset_between_attempts:
+            try:
+                logger.info(f"[RESET] Resetting white agent before attempt {attempt_num + 1}")
+                print(f"[RESET] Resetting white agent before attempt {attempt_num + 1}", file=sys.stderr, flush=True)
+                reset_result = await reset_white_agent(white_agent_url, timeout=30.0)
+                if reset_result["success"]:
+                    logger.info("[RESET] White agent reset completed successfully")
+                    print("[RESET] White agent reset completed successfully", file=sys.stderr, flush=True)
+                else:
+                    logger.warning(f"[RESET] Reset returned failure but continuing: {reset_result.get('error')}")
+                    print(f"[RESET] Reset failed but continuing: {reset_result.get('error')}", file=sys.stderr, flush=True)
+            except Exception as e:
+                logger.warning(f"[RESET] Warning: Reset failed (continuing anyway): {e}")
+                print(f"[RESET] Warning: Reset exception (continuing anyway): {e}", file=sys.stderr, flush=True)
+
         if battle_context:
             ab.record_battle_event(
                 battle_context,
@@ -822,7 +953,10 @@ User message: {obs}
         next_green_message = task_description
         # CRITICAL: Create a NEW context for each attempt to ensure white agent starts fresh
         # This prevents conversation history from leaking between attempts
-        context_id = None
+        # Generate a unique context ID for this attempt (don't rely on white agent to create it)
+        from uuid import uuid4
+        context_id = f"attempt_{attempt_num + 1}_{uuid4().hex[:8]}"
+        logger.info(f"[DEBUG] Created NEW context_id for this attempt: {context_id}")
         steps_in_attempt = 0
         attempt_error = None
 
@@ -838,41 +972,17 @@ User message: {obs}
                 # Send message to white agent
                 import time as time_module
                 import asyncio
-                logger.info(f"[DEBUG] About to send message to white agent (context_id={context_id})")
-                
-                # CRITICAL: Truncate BEFORE passing to logger to avoid massive I/O blocking
-                msg_size = len(next_green_message)
-                msg_preview = next_green_message[:300] if msg_size > 300 else next_green_message
-                logger.info(f"[DEBUG] Message size: {msg_size} chars ({len(next_green_message.encode())} bytes)")
-                logger.info(f"[DEBUG] Message preview: {msg_preview}{'...[TRUNCATED]' if msg_size > 300 else ''}")
-                logger.info(f"[DEBUG] Timestamp before send: {time_module.time()}")
 
-                try:
-                    # Wrap send_message in asyncio.wait_for for extra safety
-                    result = await asyncio.wait_for(
-                        send_message_to_white_agent(
-                            white_agent_url,
-                            next_green_message,
-                            context_id=context_id,
-                            timeout=120.0
-                        ),
-                        timeout=125.0  # Slightly longer than internal timeout
-                    )
-                    logger.info(f"[DEBUG] Timestamp after send: {time_module.time()}")
-                    logger.info("[DEBUG] White agent response received")
-                except asyncio.TimeoutError:
-                    logger.error("[DEBUG] OUTER ASYNCIO TIMEOUT after 125s!")
-                    attempt_error = "Timeout waiting for white agent response (125s outer timeout)"
-                    break
-                except Exception as send_error:
-                    error_type = type(send_error).__name__
-                    if "timeout" in error_type.lower() or "TimeoutError" in error_type:
-                        logger.error(f"[DEBUG] TIMEOUT ERROR: {error_type}: {str(send_error)}")
-                        attempt_error = f"Timeout: {str(send_error)}"
-                        break
-                    else:
-                        logger.error(f"[DEBUG] ERROR during send_message_to_white_agent: {error_type}: {str(send_error)}")
-                        raise
+                logger.info(f"[DEBUG] About to send message (step={step_num}, context={context_id})")
+
+                result = await send_message_to_white_agent(
+                    white_agent_url,
+                    next_green_message,
+                    context_id=context_id,
+                    timeout=120.0
+                )
+
+                logger.info(f"[DEBUG] send_message_to_white_agent returned, success={result.get('success')}")
 
                 if not result["success"]:
                     attempt_error = result.get("error", "Unknown error")
@@ -880,6 +990,7 @@ User message: {obs}
                     break
 
                 # Extract response
+                logger.info("[DEBUG] Extracting response from result")
                 white_agent_response = result["response"]
                 res_root = white_agent_response.root
 
@@ -889,19 +1000,17 @@ User message: {obs}
                     logger.error(attempt_error)
                     break
 
+                logger.info("[DEBUG] Response is SendMessageSuccessResponse, extracting result")
                 res_result = res_root.result
                 if not isinstance(res_result, Message):
                     attempt_error = f"Unexpected response type: {type(res_result)}"
                     logger.error(attempt_error)
                     break
 
-                # Update context ID
-                if context_id is None:
-                    context_id = res_result.context_id
-                else:
-                    assert context_id == res_result.context_id
+                logger.info(f"[DEBUG] Using context_id: {context_id}")
 
                 # Parse white agent response
+                logger.info("[DEBUG] Parsing text parts")
                 from a2a.utils import get_text_parts
                 text_parts = get_text_parts(res_result.parts)
                 if len(text_parts) != 1:
@@ -910,43 +1019,64 @@ User message: {obs}
                     break
 
                 white_text = text_parts[0]
+                logger.info(f"[DEBUG] Got white text, length={len(white_text)}")
 
                 # Parse action from response
+                logger.info("[DEBUG] Parsing XML tags")
                 white_tags = parse_xml_tags(white_text, "json")
                 if not white_tags:
                     attempt_error = "Missing <json> tags in response"
                     logger.error(attempt_error)
                     break
 
+                logger.info("[DEBUG] Parsing action JSON")
                 try:
                     action_dict = json.loads(white_tags)
                     action = Action(**action_dict)
+                    logger.info(f"[DEBUG] Parsed action: {action.name}")
                 except (json.JSONDecodeError, KeyError, TypeError, ValueError) as e:
                     attempt_error = f"Invalid JSON: {str(e)}"
                     logger.error(attempt_error)
                     break
 
-                # Execute action in tau-bench environment
+                # Execute action in tau-bench environment with a safety timeout
                 logger.info(f"[DEBUG] Calling env.step() with action: {action.name}")
-                env_response = env.step(action)
-                logger.info(f"[DEBUG] env.step() completed, reward={env_response.reward}, done={env_response.done}")
+                import asyncio as _asyncio
+                import time as _time
+                _t0 = _time.time()
+                try:
+                    # env.step is synchronous; run it in a worker thread with a timeout
+                    ENV_STEP_TIMEOUT = 60.0
+                    env_response = await _asyncio.wait_for(
+                        _asyncio.to_thread(env.step, action),
+                        timeout=ENV_STEP_TIMEOUT
+                    )
+                except _asyncio.TimeoutError:
+                    attempt_error = f"Environment step timed out after {ENV_STEP_TIMEOUT}s for action '{action.name}'"
+                    logger.error(f"[DEBUG] {attempt_error}")
+                    break
+                _dt = _time.time() - _t0
+                logger.info(f"[DEBUG] env.step() completed in {_dt:.2f}s, reward={env_response.reward}, done={env_response.done}")
                 reward = env_response.reward
                 info = {**info, **env_response.info.model_dump()}
 
                 # Prepare next message
+                logger.info("[DEBUG] Preparing next message")
                 if action.name != RESPOND_ACTION_NAME:
                     observation_text = str(env_response.observation)
                     # CRITICAL: Limit message size to prevent overwhelming white agent
                     # Large tool results (like list_all_products) can be 50K+ chars
-                    MAX_MESSAGE_SIZE = 8000  # Reasonable limit for context window
+                    MAX_MESSAGE_SIZE = 10000  # Reasonable limit for context window
                     if len(observation_text) > MAX_MESSAGE_SIZE:
-                        logger.warning(f"[DEBUG] Tool result too large ({len(observation_text)} chars), truncating to {MAX_MESSAGE_SIZE}")
+                        logger.info(f"[TRUNCATE] Tool result too large ({len(observation_text)} chars), truncating to {MAX_MESSAGE_SIZE}")
                         observation_text = observation_text[:MAX_MESSAGE_SIZE] + "\n...[TRUNCATED - Result too large. Use specific queries instead of listing all items.]"
                     next_green_message = f"Tool call result:\n{observation_text}"
                 else:
                     next_green_message = f"User message:\n{env_response.observation}"
 
+                logger.info(f"[DEBUG] Next message prepared, done={env_response.done}")
                 if env_response.done:
+                    logger.info("[DEBUG] Task completed, breaking loop")
                     break
 
             except Exception as e:
@@ -1137,9 +1267,13 @@ User message: {obs}
     logger.info(f"Success rate: {success_rate:.1%} ({num_successes}/{k})")
     logger.info(f"Average steps on success: {avg_steps:.1f}")
 
-    # Report detailed breakdown to AgentBeats
+    # Report detailed breakdown to AgentBeats with a safety timeout
     if battle_context:
-        await report_pass_k_results(results, battle_context)
+        import asyncio as _asyncio
+        try:
+            await _asyncio.wait_for(report_pass_k_results(results, battle_context), timeout=20.0)
+        except _asyncio.TimeoutError:
+            logger.warning("[FINALIZE] Reporting results to AgentBeats timed out after 20s; returning results anyway.")
 
     return results
 
@@ -1226,11 +1360,23 @@ def extract_failure_details(info: Dict[str, Any], error: Optional[str]) -> Dict[
         if "timeout" in error.lower():
             failure_detail["category"] = "timeout"
             failure_detail["description"] = f"Evaluation timed out after {failure_detail.get('steps_completed', '?')} steps"
-        elif "json" in error.lower() or "format" in error.lower() or "tags" in error.lower():
+        elif "llm provider not provided" in error.lower() or "bad request" in error.lower() or "api key" in error.lower() or "401" in error or "403" in error:
+            failure_detail["category"] = "llm_configuration_error"
+            failure_detail["fault_author"] = "environment"
+            failure_detail["fault_type"] = "other"
+            failure_detail["description"] = "LLM API configuration error (check model name, API key, or provider settings)"
+        elif "missing" in error.lower() and "json" in error.lower() and "tags" in error.lower():
+            # Only categorize as format_error if explicitly about missing JSON tags
             failure_detail["category"] = "format_error"
             failure_detail["fault_author"] = "agent"  # Agent produced bad format
             failure_detail["fault_type"] = "other"
             failure_detail["description"] = "Agent returned improperly formatted response (missing or invalid JSON tags)"
+        elif "json" in error.lower() and ("parse" in error.lower() or "decode" in error.lower()):
+            # JSON parsing errors
+            failure_detail["category"] = "format_error"
+            failure_detail["fault_author"] = "agent"
+            failure_detail["fault_type"] = "other"
+            failure_detail["description"] = "Agent returned invalid JSON that could not be parsed"
         elif "communication" in error.lower() or "connection" in error.lower():
             failure_detail["category"] = "communication_error"
             failure_detail["description"] = "Network or communication error with white agent"

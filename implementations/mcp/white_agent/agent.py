@@ -5,6 +5,7 @@ import sys
 sys.path.insert(0, '/Users/max/Documents/Uni/Berkeley/agentic_ai/tau-bench-agents')
 from implementations.mcp.shared_config import TAU_USER_MODEL, TAU_USER_PROVIDER
 
+import logging
 import uvicorn
 import dotenv
 from a2a.server.apps import A2AStarletteApplication
@@ -16,8 +17,13 @@ from a2a.types import AgentSkill, AgentCard, AgentCapabilities
 from a2a.utils import new_agent_text_message
 from litellm import completion
 
+# Set up logging
+logger = logging.getLogger("white_agent")
+
 # Safety: limit message history to prevent context overflow while maintaining coherence
-MAX_MESSAGES_IN_HISTORY = 20  # Keep last 20 messages (10 exchanges) + system prompt
+# Claude Haiku has ~200K context, set conservative limit
+# Each tau-bench attempt should complete in <30 steps, so 60 messages is plenty
+MAX_MESSAGES_IN_HISTORY = 60  # Keep last 60 messages (30 exchanges) + system prompt
 
 
 dotenv.load_dotenv()
@@ -47,7 +53,7 @@ def prepare_white_agent_card(url):
 class GeneralWhiteAgentExecutor(AgentExecutor):
     def __init__(self):
         self.ctx_id_to_messages = {}
-        self.max_contexts = 10  # Prevent unbounded memory growth (allow up to 10 concurrent contexts)
+        self.max_contexts = 20  # Prevent unbounded memory growth (allow up to 10 concurrent contexts)
 
     async def execute(self, context: RequestContext, event_queue: EventQueue) -> None:
         # parse the task
@@ -77,12 +83,16 @@ class GeneralWhiteAgentExecutor(AgentExecutor):
                 print(f"[White Agent] Cleared old context {oldest_context} to prevent memory leak (max={self.max_contexts})")
 
             # Initialize with system prompt to enforce JSON format
+            print(f"[White Agent] Creating NEW context: {context.context_id}")
             self.ctx_id_to_messages[context.context_id] = [
                 {
                     "role": "system",
-                    "content": "You are a retail customer service agent. You MUST always respond with your answer wrapped in <json>...</json> tags. Never respond with plain text outside these tags. Follow the JSON format exactly as specified in the user's instructions."
+                    "content": "You are a helpful retail customer service agent. When you need to take an action or respond to the user, you should format your response with the action/response wrapped in <json>...</json> tags as specified in the instructions. The JSON should contain 'name' (the function name or 'respond') and 'kwargs' (the arguments or message content)."
                 }
             ]
+        else:
+            print(f"[White Agent] Reusing existing context: {context.context_id} (currently {len(self.ctx_id_to_messages[context.context_id])} messages)")
+            
         messages = self.ctx_id_to_messages[context.context_id]
         messages.append(
             {
@@ -112,6 +122,8 @@ class GeneralWhiteAgentExecutor(AgentExecutor):
         # Add timeout protection to prevent hanging on LLM calls
         import asyncio
         try:
+            logger.info(f"[API] >>> Sending LLM request: model={TAU_USER_MODEL}, messages={len(messages)}, temp={temperature}")
+            print(f"[White Agent API] >>> Sending LLM request: model={TAU_USER_MODEL}, messages={len(messages)}, temp={temperature}", file=sys.stderr, flush=True)
             response = await asyncio.wait_for(
                 asyncio.to_thread(
                     completion,
@@ -121,8 +133,11 @@ class GeneralWhiteAgentExecutor(AgentExecutor):
                 ),
                 timeout=60.0  # 60 second timeout for LLM completion
             )
+            logger.info(f"[API] <<< Received LLM response: {len(response.choices[0].message.content or '')} chars")
+            print(f"[White Agent API] <<< Received LLM response: {len(response.choices[0].message.content or '')} chars", file=sys.stderr, flush=True)
         except asyncio.TimeoutError:
             error_msg = "LLM completion timed out after 60 seconds"
+            logger.error(f"[API] XXX {error_msg}")
             print(f"[White Agent ERROR] {error_msg}")
             # Return error response in expected format
             await event_queue.enqueue_event(
@@ -140,11 +155,28 @@ class GeneralWhiteAgentExecutor(AgentExecutor):
                 "content": next_message["content"],
             }
         )
-        await event_queue.enqueue_event(
-            new_agent_text_message(
-                next_message["content"], context_id=context.context_id
+        # Instrumentation: log enqueue progress and catch any issues explicitly
+        logger.info("[EXEC] Enqueueing response event to event_queue")
+        try:
+            await event_queue.enqueue_event(
+                new_agent_text_message(
+                    next_message["content"], context_id=context.context_id
+                )
             )
-        )
+            logger.info("[EXEC] Enqueue completed; returning from executor")
+            return
+        except Exception as enqueue_err:
+            logger.error(f"[EXEC] Failed to enqueue response: {type(enqueue_err).__name__}: {enqueue_err}", exc_info=True)
+            # Best-effort fallback: still try to return a final message
+            try:
+                await event_queue.enqueue_event(
+                    new_agent_text_message(
+                        '<json>{"name": "respond", "kwargs": {"content": "Encountered an internal error delivering response, but here is my reply."}}</json>',
+                        context_id=context.context_id
+                    )
+                )
+            finally:
+                return
 
     async def cancel(self, context, event_queue) -> None:
         raise NotImplementedError
@@ -157,7 +189,36 @@ class GeneralWhiteAgentExecutor(AgentExecutor):
 
 
 def start_white_agent(agent_name="general_white_agent", host="localhost", port=9004):
+    # FORCE logging configuration for white agent
+    # Clear any existing handlers and configure fresh
+    root_logger = logging.getLogger()
+    
+    # Remove all existing handlers
+    for handler in root_logger.handlers[:]:
+        root_logger.removeHandler(handler)
+    
+    # Create new handlers with force=True
+    file_handler = logging.FileHandler('white_agent.log', mode='a')
+    file_handler.setFormatter(logging.Formatter('%(asctime)s - %(name)s - %(levelname)s - %(message)s'))
+    
+    stream_handler = logging.StreamHandler(sys.stdout)
+    stream_handler.setFormatter(logging.Formatter('%(asctime)s - %(name)s - %(levelname)s - %(message)s'))
+    
+    # Add handlers
+    root_logger.addHandler(file_handler)
+    root_logger.addHandler(stream_handler)
+    root_logger.setLevel(logging.INFO)
+    
+    # Also configure the white_agent logger specifically
+    logger.handlers.clear()
+    logger.addHandler(file_handler)
+    logger.addHandler(stream_handler)
+    logger.setLevel(logging.INFO)
+    # Prevent duplicate logging via root handlers
+    logger.propagate = False
+    
     print("Starting white agent...")
+    logger.info("Starting white agent...")
     url = f"http://{host}:{port}"
     card = prepare_white_agent_card(url)
 

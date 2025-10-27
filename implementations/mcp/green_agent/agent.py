@@ -441,12 +441,15 @@ class TauGreenAgentExecutor(AgentExecutor):
             )
 
             # Run pass@k evaluation using our tool
+            # Allow optional control of white-agent restarts between attempts via TOML
+            reset_between_attempts = bool(self.pass_k_config.get("reset_between_attempts", False))
             results = await green_tools.evaluate_agent_with_pass_k(
                 white_agent_url=white_agent_url,
                 domain=domain,
                 task_id=task_id,
                 k=k,
                 max_num_steps=30,
+                reset_between_attempts=reset_between_attempts,
                 battle_id=battle_id,
                 backend_url=backend_url
             )

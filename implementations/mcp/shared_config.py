@@ -18,8 +18,8 @@ print(f"{'='*70}\n")
 
 if USE_PROVIDER == "openrouter":
     # Configure for OpenRouter
-    TAU_USER_MODEL = "openai/gpt-5-nano" # from gpt-4o-mini
-    TAU_USER_PROVIDER = "openai"
+    TAU_USER_MODEL = "openrouter/anthropic/claude-haiku-4.5"  # Free tier model "openrouter/anthropic/claude-haiku-4.5". "openrouter/openai/gpt-5-nano" 
+    TAU_USER_PROVIDER = "openrouter" #openai
     
     # Set LiteLLM to use OpenRouter endpoint
     litellm.api_base = "https://openrouter.ai/api/v1"
