@@ -8,7 +8,6 @@ These tools can be used directly by agents or exposed through MCP servers.
 
 import json
 import logging
-import os
 import sys
 from typing import Dict, Any, Optional, TYPE_CHECKING
 
@@ -51,17 +50,18 @@ def _get_httpx_client(timeout: float = 120.0) -> "httpx.AsyncClient":
     # ALWAYS create a fresh client - no global caching!
     # Reusing clients leads to stale/CLOSED connections that hang indefinitely
     limits = httpx.Limits(
-        max_keepalive_connections=5,  # Reduced from 10
-        max_connections=10,            # Reduced from 20
-        keepalive_expiry=10.0          # Reduced from 30.0 - shorter connection reuse
+        max_keepalive_connections=0,   # DISABLE keepalive completely - no connection reuse
+        max_connections=5,              # Lower limit to prevent socket exhaustion
+        keepalive_expiry=1.0            # Very short expiry
     )
     client = httpx.AsyncClient(
-        timeout=httpx.Timeout(timeout, connect=10.0),  # Explicit connect timeout
+        timeout=httpx.Timeout(timeout, connect=5.0),  # Shorter connect timeout
         limits=limits,
         http2=False,  # Disable HTTP/2 to avoid protocol issues
-        trust_env=False  # Ignore env proxies/netrc to avoid surprises
+        trust_env=False,  # Ignore env proxies/netrc to avoid surprises
+        follow_redirects=False  # Don't follow redirects
     )
-    logger.info(f"[DEBUG] Created FRESH httpx client (timeout={timeout}s)")
+    logger.info(f"[DEBUG] Created FRESH httpx client (timeout={timeout}s, keepalive=DISABLED)")
 
     return client
 
@@ -98,45 +98,32 @@ async def send_message_to_white_agent(
         from uuid import uuid4
         import asyncio
 
-        logger.info(f"[DEBUG send_message] Starting - timeout={timeout}s, context_id={context_id}")
-
-        # CRITICAL: Use FRESH httpx client for each call to avoid stale connections
-        logger.info("[DEBUG send_message] Creating fresh httpx client...")
+        # Use FRESH httpx client for each call to avoid stale connections
         httpx_client = _get_httpx_client(timeout)
 
         try:
             # Use cached agent card if available for same URL
             global _cached_agent_card, _card_cache_url
             if _cached_agent_card and _card_cache_url == white_agent_url:
-                logger.info("[DEBUG send_message] Using cached agent card")
                 card = _cached_agent_card
             else:
-                logger.info("[DEBUG send_message] Creating A2A card resolver...")
                 resolver = A2ACardResolver(httpx_client=httpx_client, base_url=white_agent_url)
-
-                logger.info("[DEBUG send_message] Fetching agent card...")
                 try:
-                    # Add aggressive timeout for card fetch (this sometimes hangs!)
                     card = await asyncio.wait_for(
                         resolver.get_agent_card(relative_card_path="/.well-known/agent-card.json"),
-                        timeout=5.0  # 5 second timeout for card fetch
+                        timeout=5.0
                     )
-                    logger.info("[DEBUG send_message] Agent card fetched successfully")
-                    # Cache it
                     _cached_agent_card = card
                     _card_cache_url = white_agent_url
                 except asyncio.TimeoutError:
-                    logger.error("[DEBUG send_message] CARD FETCH TIMEOUT after 5s!")
                     raise TimeoutError("Agent card fetch timeout after 5s")
 
             if card is None:
                 raise RuntimeError(f"Failed to resolve agent card from {white_agent_url}")
 
-            logger.info("[DEBUG send_message] Creating A2A client...")
             client = A2AClient(httpx_client=httpx_client, agent_card=card)
 
             # Send message
-            logger.info(f"[DEBUG send_message] Preparing message (length={len(message)} chars)...")
             params = MessageSendParams(
                 message=Message(
                     role=Role.user,
@@ -150,18 +137,12 @@ async def send_message_to_white_agent(
             request_id = uuid4().hex
             req = SendMessageRequest(id=request_id, params=params)
 
-            logger.info(f"[A2A] >>> Sending message to white agent: msg_len={len(message)}, context={context_id}")
-            print(f"[Green Agent A2A] >>> Sending A2A message to white agent: msg_len={len(message)}, context={context_id}", file=sys.stderr, flush=True)
-            logger.info("[DEBUG send_message] Calling client.send_message() - THIS IS WHERE IT MIGHT HANG...")
+            logger.info(f"[A2A] >>> Sending to white agent (len={len(message)}, ctx={context_id})")
 
-            # Add asyncio.wait_for to enforce timeout at the asyncio level
             try:
                 response = await asyncio.wait_for(client.send_message(request=req), timeout=timeout)
-                logger.info("[DEBUG send_message] client.send_message() returned successfully!")
-                logger.info(f"[A2A] <<< Received response: {type(response).__name__}")
-                print(f"[Green Agent A2A] <<< Received A2A response: {type(response).__name__}", file=sys.stderr, flush=True)
+                logger.info("[A2A] <<< Received response")
             except asyncio.TimeoutError:
-                logger.error(f"[DEBUG send_message] ASYNCIO TIMEOUT after {timeout}s!")
                 raise TimeoutError(f"Message send timeout after {timeout}s")
 
             return {
@@ -172,35 +153,20 @@ async def send_message_to_white_agent(
             }
 
         finally:
-            # CRITICAL: Always close the httpx client to prevent stale connections
             await httpx_client.aclose()
-            logger.info("[DEBUG send_message] Closed httpx client")
 
     except Exception as e:
         error_msg = str(e)
         error_type = type(e).__name__
 
-        # Enhanced error detection with actionable advice
-        if "429" in error_msg or "rate" in error_msg.lower() or "quota" in error_msg.lower():
-            logger.error(f"🚫 RATE LIMIT ERROR: {error_type}: {error_msg}")
-            logger.error("💡 TIP: Switch to OpenRouter to avoid rate limits:")
-            logger.error("   export OPENROUTER_API_KEY='your-key'")
-            logger.error("   source ./scripts/use_openrouter.sh")
-        elif "timeout" in error_type.lower() or "TimeoutError" in error_type:
-            logger.error(f"⏱️  TIMEOUT ERROR: {error_type}: {error_msg}")
-            logger.error(f"💡 TIP: The white agent took too long to respond (>{timeout}s)")
+        if "429" in error_msg or "rate" in error_msg.lower():
+            logger.error(f"Rate limit error: {error_msg}")
+        elif "timeout" in error_type.lower():
+            logger.error(f"Timeout error: {error_msg}")
         elif "401" in error_msg or "unauthorized" in error_msg.lower():
-            logger.error(f"🔑 AUTH ERROR: {error_type}: {error_msg}")
-            logger.error("💡 TIP: Check your API key is set correctly")
-            try:
-                from implementations.mcp.shared_config import TAU_USER_PROVIDER as _PROVIDER  # type: ignore
-            except Exception:
-                _PROVIDER = None
-            if (_PROVIDER or "").lower() == "openrouter":
-                logger.error("   Current provider: OpenRouter")
-                logger.error(f"   Key set: {'Yes' if os.environ.get('OPENROUTER_API_KEY') else 'No'}")
+            logger.error(f"Auth error: {error_msg}")
         else:
-            logger.error(f"[DEBUG send_message] ERROR: {error_type}: {error_msg}", exc_info=True)
+            logger.error(f"Error sending message: {error_type}: {error_msg}")
 
         return {
             "success": False,
@@ -223,93 +189,60 @@ async def reset_white_agent(white_agent_url: str, timeout: float = 30.0) -> Dict
         Dict with success status and message
     """
     global _cached_agent_card, _card_cache_url
-    
+
     try:
-        logger.info(f"[RESET] >>> Resetting white agent at {white_agent_url}")
-        print(f"[Green Agent RESET] >>> Resetting white agent at {white_agent_url}", file=sys.stderr, flush=True)
-        
-        # Extract host and port from URL
         import re
+        import asyncio
+
+        logger.info(f"[RESET] Resetting white agent at {white_agent_url}")
+
+        # Extract host and port from URL
         match = re.match(r'https?://([^:]+):(\d+)', white_agent_url)
         if not match:
-            logger.error(f"[RESET] Invalid white_agent_url format: {white_agent_url}")
             return {"success": False, "error": "Invalid URL format"}
-        
+
         host, port = match.groups()
-        
-        # White agent launcher is on port 9210
         launcher_url = f"http://{host}:9210"
 
         httpx_client = _get_httpx_client(timeout)
         try:
-            # Step 1: Terminate the white agent
-            logger.info(f"[RESET] Terminating white agent via {launcher_url}/terminate")
-            print("[RESET] Terminating white agent...", file=sys.stderr, flush=True)
-            terminate_response = await httpx_client.post(
-                f"{launcher_url}/terminate",
-                timeout=timeout
-            )
-            logger.info(f"[RESET] Terminate response: {terminate_response.status_code}")
-            
-            # Step 2: Wait a moment for clean shutdown
-            import asyncio
+            # Terminate the white agent
+            await httpx_client.post(f"{launcher_url}/terminate", timeout=timeout)
             await asyncio.sleep(1.0)
-            
-            # Step 3: Relaunch the white agent
-            logger.info(f"[RESET] Relaunching white agent via {launcher_url}/launch")
-            print("[RESET] Relaunching white agent...", file=sys.stderr, flush=True)
-            launch_response = await httpx_client.post(
-                f"{launcher_url}/launch",
-                timeout=timeout
-            )
-            
+
+            # Relaunch the white agent
+            launch_response = await httpx_client.post(f"{launcher_url}/launch", timeout=timeout)
+
             if launch_response.status_code == 200:
-                logger.info("[RESET] <<< White agent restarted successfully")
-                print("[RESET] <<< White agent restarted successfully", file=sys.stderr, flush=True)
-                
-                # Wait for agent to be fully ready by probing the new agent card endpoint
-                # Retry for up to `timeout` seconds with small backoff
-                ready = False
+                # Wait for agent to be ready
                 start = asyncio.get_event_loop().time()
                 probe_path = "/.well-known/agent-card.json"
-                last_err = None
                 while (asyncio.get_event_loop().time() - start) < timeout:
                     try:
                         resp = await httpx_client.get(f"{white_agent_url}{probe_path}", timeout=5.0)
                         if resp.status_code == 200:
-                            ready = True
                             break
-                        else:
-                            last_err = f"status={resp.status_code}"
-                    except Exception as pe:
-                        last_err = str(pe)
+                    except Exception:
+                        pass
                     await asyncio.sleep(0.5)
-                if not ready:
-                    logger.warning(f"[RESET] White agent readiness probe failed within {timeout}s (last_err={last_err})")
-                
-                # Clear agent card cache to force refetch
+
+                # Clear agent card cache
                 _cached_agent_card = None
                 _card_cache_url = None
-                logger.info("[RESET] Cleared agent card cache")
-                
-                return {"success": True, "message": "White agent restarted successfully"}
+
+                return {"success": True, "message": "White agent restarted"}
             else:
-                logger.error(f"[RESET] Launch failed with status {launch_response.status_code}")
                 return {"success": False, "error": f"Launch returned {launch_response.status_code}"}
-                
+
         except Exception as e:
-            logger.error(f"[RESET] Failed to restart white agent: {e}")
-            print(f"[RESET] Failed to restart white agent: {e}", file=sys.stderr, flush=True)
-            # Even if restart fails, clear the cache
             _cached_agent_card = None
             _card_cache_url = None
             return {"success": False, "error": str(e)}
         finally:
             await httpx_client.aclose()
-            
+
     except Exception as e:
-        logger.error(f"[RESET] XXX Reset failed: {e}")
-        print(f"[RESET] XXX Reset failed: {e}", file=sys.stderr, flush=True)
+        logger.error(f"[RESET] Reset failed: {e}")
         return {"success": False, "error": str(e)}
 
 
@@ -955,26 +888,19 @@ User message: {obs}
         """
 
         next_green_message = task_description
-        # CRITICAL: Create a NEW context for each attempt to ensure white agent starts fresh
+        # Create a NEW context for each attempt to ensure white agent starts fresh
         # This prevents conversation history from leaking between attempts
-        # Generate a unique context ID for this attempt (don't rely on white agent to create it)
         context_id = f"attempt_{attempt_num + 1}_{uuid4().hex[:8]}"
-        logger.info(f"[DEBUG] Created NEW context_id for this attempt: {context_id}")
         steps_in_attempt = 0
         attempt_error = None
 
         # Evaluation loop for this attempt
-        for step_num in range(max_num_steps):
-            logger.info(f"[DEBUG] === LOOP ITERATION START: step_num={step_num} ===")
+        for _ in range(max_num_steps):
             steps_in_attempt += 1
             total_steps += 1
-            logger.info(f"[DEBUG] Attempt {attempt_num + 1}, Step {step_num + 1}/{max_num_steps}")
-            logger.info(f"[DEBUG] steps_in_attempt={steps_in_attempt}, total_steps={total_steps}")
 
             try:
                 # Send message to white agent
-                logger.info(f"[DEBUG] About to send message (step={step_num}, context={context_id})")
-
                 result = await send_message_to_white_agent(
                     white_agent_url,
                     next_green_message,
@@ -982,15 +908,12 @@ User message: {obs}
                     timeout=120.0
                 )
 
-                logger.info(f"[DEBUG] send_message_to_white_agent returned, success={result.get('success')}")
-
                 if not result["success"]:
                     attempt_error = result.get("error", "Unknown error")
                     logger.error(f"White agent error: {attempt_error}")
                     break
 
                 # Extract response
-                logger.info("[DEBUG] Extracting response from result")
                 white_agent_response = result["response"]
                 res_root = white_agent_response.root
 
@@ -999,17 +922,13 @@ User message: {obs}
                     logger.error(attempt_error)
                     break
 
-                logger.info("[DEBUG] Response is SendMessageSuccessResponse, extracting result")
                 res_result = res_root.result
                 if not isinstance(res_result, Message):
                     attempt_error = f"Unexpected response type: {type(res_result)}"
                     logger.error(attempt_error)
                     break
 
-                logger.info(f"[DEBUG] Using context_id: {context_id}")
-
                 # Parse white agent response
-                logger.info("[DEBUG] Parsing text parts")
                 text_parts = get_text_parts(res_result.parts)
                 if len(text_parts) != 1:
                     attempt_error = "Expected exactly one text part from white agent"
@@ -1017,31 +936,24 @@ User message: {obs}
                     break
 
                 white_text = text_parts[0]
-                logger.info(f"[DEBUG] Got white text, length={len(white_text)}")
 
                 # Parse action from response
-                logger.info("[DEBUG] Parsing XML tags")
                 white_tags = parse_xml_tags(white_text, "json")
                 if not white_tags:
                     attempt_error = "Missing <json> tags in response"
                     logger.error(attempt_error)
                     break
 
-                logger.info("[DEBUG] Parsing action JSON")
                 try:
                     action_dict = json.loads(white_tags)
                     action = Action(**action_dict)
-                    logger.info(f"[DEBUG] Parsed action: {action.name}")
                 except (json.JSONDecodeError, KeyError, TypeError, ValueError) as e:
                     attempt_error = f"Invalid JSON: {str(e)}"
                     logger.error(attempt_error)
                     break
 
                 # Execute action in tau-bench environment with a safety timeout
-                logger.info(f"[DEBUG] Calling env.step() with action: {action.name}")
-                _t0 = time.time()
                 try:
-                    # env.step is synchronous; run it in a worker thread with a timeout
                     ENV_STEP_TIMEOUT = 60.0
                     env_response = await asyncio.wait_for(
                         asyncio.to_thread(env.step, action),
@@ -1049,30 +961,24 @@ User message: {obs}
                     )
                 except asyncio.TimeoutError:
                     attempt_error = f"Environment step timed out after {ENV_STEP_TIMEOUT}s for action '{action.name}'"
-                    logger.error(f"[DEBUG] {attempt_error}")
+                    logger.error(attempt_error)
                     break
-                _dt = time.time() - _t0
-                logger.info(f"[DEBUG] env.step() completed in {_dt:.2f}s, reward={env_response.reward}, done={env_response.done}")
+
                 reward = env_response.reward
                 info = {**info, **env_response.info.model_dump()}
 
                 # Prepare next message
-                logger.info("[DEBUG] Preparing next message")
                 if action.name != RESPOND_ACTION_NAME:
                     observation_text = str(env_response.observation)
-                    # CRITICAL: Limit message size to prevent overwhelming white agent
-                    # Large tool results (like list_all_products) can be 50K+ chars
-                    MAX_MESSAGE_SIZE = 10000  # Reasonable limit for context window
+                    MAX_MESSAGE_SIZE = 10000
                     if len(observation_text) > MAX_MESSAGE_SIZE:
-                        logger.info(f"[TRUNCATE] Tool result too large ({len(observation_text)} chars), truncating to {MAX_MESSAGE_SIZE}")
-                        observation_text = observation_text[:MAX_MESSAGE_SIZE] + "\n...[TRUNCATED - Result too large. Use specific queries instead of listing all items.]"
+                        logger.info(f"Truncating tool result from {len(observation_text)} to {MAX_MESSAGE_SIZE} chars")
+                        observation_text = observation_text[:MAX_MESSAGE_SIZE] + "\n...[TRUNCATED]"
                     next_green_message = f"Tool call result:\n{observation_text}"
                 else:
                     next_green_message = f"User message:\n{env_response.observation}"
 
-                logger.info(f"[DEBUG] Next message prepared, done={env_response.done}")
                 if env_response.done:
-                    logger.info("[DEBUG] Task completed, breaking loop")
                     break
 
             except Exception as e:
@@ -1080,36 +986,18 @@ User message: {obs}
                 logger.error(attempt_error, exc_info=True)
                 break
 
-        logger.info(f"[DEBUG] === LOOP FINISHED: completed {steps_in_attempt} steps ===")
+        logger.info(f"Attempt {attempt_num + 1} completed: {steps_in_attempt} steps, reward={reward}")
         
         # Record attempt result
         time_used = time.time() - timestamp_started
         success = (reward == 1 and attempt_error is None)
 
-        logger.info(f"[DEBUG] Attempt {attempt_num + 1} finished:")
-        logger.info(f"[DEBUG]   - success: {success}")
-        logger.info(f"[DEBUG]   - reward: {reward}")
-        logger.info(f"[DEBUG]   - attempt_error: {attempt_error}")
-        logger.info(f"[DEBUG]   - steps: {steps_in_attempt}")
-
         # Extract detailed failure information from tau-bench
         failure_detail = None
         if not success:
-            logger.info("[DEBUG] Extracting failure details from info dict...")
-            logger.info(f"[DEBUG] info keys: {list(info.keys())}")
-            if "reward_info" in info:
-                logger.info(f"[DEBUG] reward_info: {json.dumps(info['reward_info'], indent=2)}")
-            if "task" in info:
-                logger.info(f"[DEBUG] task keys: {list(info.get('task', {}).keys())}")
-
             failure_detail = extract_failure_details(info, attempt_error)
             failure_reason = failure_detail["category"]
             failure_reasons.append(failure_reason)
-
-            logger.info("[DEBUG] Extracted failure_detail:")
-            logger.info(f"[DEBUG]   - category: {failure_detail['category']}")
-            logger.info(f"[DEBUG]   - missing_outputs: {failure_detail.get('missing_outputs', [])}")
-            logger.info(f"[DEBUG]   - output_score: {failure_detail.get('output_score')}")
 
         attempts.append({
             "attempt": attempt_num + 1,
@@ -1118,28 +1006,20 @@ User message: {obs}
             "steps": steps_in_attempt,
             "time": time_used,
             "error": attempt_error,
-            "failure_detail": failure_detail,  # Add detailed failure info
-            "tau_bench_info": info  # Keep full info for debugging
+            "failure_detail": failure_detail,
+            "tau_bench_info": info
         })
 
         # Log attempt result
         result_emoji = "✅" if success else "❌"
-        logger.info(f"Attempt {attempt_num + 1} result: {result_emoji} (reward={reward}, steps={steps_in_attempt})")
-        logger.info(f"[DEBUG] ========== ATTEMPT {attempt_num + 1}/{k} COMPLETED ==========")
+        logger.info(f"Attempt {attempt_num + 1}/{k}: {result_emoji} (reward={reward}, steps={steps_in_attempt}, time={time_used:.1f}s)")
 
-        # Small delay between attempts to prevent resource exhaustion (reduced from 2s to 0.5s)
-        if attempt_num < k - 1:  # Don't delay after the last attempt
-            logger.info("[DEBUG] Waiting 0.5 seconds before next attempt...")
-            import asyncio
-            await asyncio.sleep(0.5)
-
-        # Log detailed failure info if available
-        if not success and failure_detail:
-            logger.info(f"  Failure: {failure_detail['category']}")
-            if failure_detail.get('missing_outputs'):
-                logger.info(f"  Missing outputs: {failure_detail['missing_outputs']}")
-            if failure_detail.get('task_instruction'):
-                logger.info(f"  Task was: {failure_detail['task_instruction'][:100]}...")
+        # Small delay between attempts to prevent resource exhaustion
+        if attempt_num < k - 1:
+            global _cached_agent_card, _card_cache_url
+            _cached_agent_card = None
+            _card_cache_url = None
+            await asyncio.sleep(2.0)
 
         if battle_context:
             # Build detailed failure message for UI

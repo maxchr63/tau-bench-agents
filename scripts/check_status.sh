@@ -65,11 +65,11 @@ fi
 # Check if agents are running
 echo ""
 echo "Checking if agents are running..."
-GREEN_AGENT=$(lsof -i :9003 -t 2>/dev/null)
+GREEN_AGENT=$(lsof -i :9006 -t 2>/dev/null)
 WHITE_AGENT=$(lsof -i :9004 -t 2>/dev/null)
 
 if [ -z "$GREEN_AGENT" ]; then
-    echo "ℹ️  Green agent is NOT running on port 9003 (launch it first)"
+    echo "ℹ️  Green agent is NOT running on port 9006 (launch it first)"
 else
     echo "✅ Green agent is running (PID: $GREEN_AGENT)"
 fi
@@ -89,7 +89,7 @@ if [ -z "$GREEN_RUNNING" ] || [ -z "$WHITE_RUNNING" ]; then
 else
     echo "1. Register agents in AgentBeats UI:"
     echo "   - White: http://localhost:9004 (Launcher: http://localhost:9210)"
-    echo "   - Green: http://localhost:9003 (Launcher: http://localhost:9111)"
+    echo "   - Green: http://localhost:9006 (Launcher: http://localhost:9111)"
     echo "2. Launch agents via UI or API"
     echo "3. Create and run your evaluation!"
 fi
