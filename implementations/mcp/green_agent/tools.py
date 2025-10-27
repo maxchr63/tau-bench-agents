@@ -866,6 +866,10 @@ async def evaluate_agent_with_pass_k(
         Dict with pass^k metrics, attempt details, and failure analysis
     """
     import time
+    import asyncio
+    from uuid import uuid4
+    from a2a.types import SendMessageSuccessResponse, Message
+    from a2a.utils import get_text_parts
 
     logger.info(f"=== Starting pass@k evaluation: domain={domain}, task={task_id}, k={k} ===")
 
@@ -954,7 +958,6 @@ User message: {obs}
         # CRITICAL: Create a NEW context for each attempt to ensure white agent starts fresh
         # This prevents conversation history from leaking between attempts
         # Generate a unique context ID for this attempt (don't rely on white agent to create it)
-        from uuid import uuid4
         context_id = f"attempt_{attempt_num + 1}_{uuid4().hex[:8]}"
         logger.info(f"[DEBUG] Created NEW context_id for this attempt: {context_id}")
         steps_in_attempt = 0
@@ -970,9 +973,6 @@ User message: {obs}
 
             try:
                 # Send message to white agent
-                import time as time_module
-                import asyncio
-
                 logger.info(f"[DEBUG] About to send message (step={step_num}, context={context_id})")
 
                 result = await send_message_to_white_agent(
@@ -994,7 +994,6 @@ User message: {obs}
                 white_agent_response = result["response"]
                 res_root = white_agent_response.root
 
-                from a2a.types import SendMessageSuccessResponse, Message
                 if not isinstance(res_root, SendMessageSuccessResponse):
                     attempt_error = f"White agent returned error: {res_root}"
                     logger.error(attempt_error)
@@ -1011,7 +1010,6 @@ User message: {obs}
 
                 # Parse white agent response
                 logger.info("[DEBUG] Parsing text parts")
-                from a2a.utils import get_text_parts
                 text_parts = get_text_parts(res_result.parts)
                 if len(text_parts) != 1:
                     attempt_error = "Expected exactly one text part from white agent"
@@ -1041,21 +1039,19 @@ User message: {obs}
 
                 # Execute action in tau-bench environment with a safety timeout
                 logger.info(f"[DEBUG] Calling env.step() with action: {action.name}")
-                import asyncio as _asyncio
-                import time as _time
-                _t0 = _time.time()
+                _t0 = time.time()
                 try:
                     # env.step is synchronous; run it in a worker thread with a timeout
                     ENV_STEP_TIMEOUT = 60.0
-                    env_response = await _asyncio.wait_for(
-                        _asyncio.to_thread(env.step, action),
+                    env_response = await asyncio.wait_for(
+                        asyncio.to_thread(env.step, action),
                         timeout=ENV_STEP_TIMEOUT
                     )
-                except _asyncio.TimeoutError:
+                except asyncio.TimeoutError:
                     attempt_error = f"Environment step timed out after {ENV_STEP_TIMEOUT}s for action '{action.name}'"
                     logger.error(f"[DEBUG] {attempt_error}")
                     break
-                _dt = _time.time() - _t0
+                _dt = time.time() - _t0
                 logger.info(f"[DEBUG] env.step() completed in {_dt:.2f}s, reward={env_response.reward}, done={env_response.done}")
                 reward = env_response.reward
                 info = {**info, **env_response.info.model_dump()}
