@@ -4,6 +4,54 @@ An MCP-ready implementation of τ-bench integration for AgentBeats, featuring mo
 
 ---
 
+## 📋 Quick Commands
+
+**Installation:**
+
+```bash
+cd tau-bench-agents
+uv sync
+echo "OPENROUTER_API_KEY=your_key_here" >> .env
+```
+
+**Run White Agent (agent being tested):**
+
+```bash
+uv run python main.py white
+# Runs on http://localhost:9004
+```
+
+**Run Green Agent (evaluator):**
+
+```bash
+uv run python main.py green
+# Runs on http://localhost:9006
+```
+
+**Test Green Agent Evaluation:**
+
+```bash
+uv run python test_mcp_tools.py
+# Tests tau-bench integration and tools
+```
+
+**Run on AgentBeats (complete):**
+
+```bash
+./scripts/start_mcp.sh
+# Then register agents in AgentBeats UI at http://localhost:5173
+```
+
+**Reproduce Tau-Bench Results:**
+
+```bash
+# Configure task in implementations/mcp/green_agent/tau_green_agent_mcp.toml
+# Set mode="manual", domain="retail", task_id=5, k=1
+# Run battle in AgentBeats UI
+```
+
+---
+
 ## 🚀 Quick Start
 
 ```bash
@@ -28,6 +76,7 @@ uv run python test_mcp_tools.py
 - [Running Locally](#running-locally)
 - [Pass@k Evaluation](#passk-evaluation)
 - [Testing on AgentBeats](#testing-on-agentbeats)
+- [Reproducing Tau-Bench Results](#reproducing-tau-bench-results)
 - [Troubleshooting](#troubleshooting)
 
 ---
@@ -66,15 +115,51 @@ echo "OPENROUTER_API_KEY=your_key_here" >> .env
 uv run python test_mcp_tools.py
 ```
 
+### Additional hard reset before restart
+
+```bash
+# Clean up any running processes
+pkill -f 'python main.py'
+pkill -f 'python.*launcher'
+
+# Navigate to tau-bench-agents
+cd /path/to/tau-bench-agents
+
+# Start MCP agents
+./scripts/start_mcp.sh
+```
+
 ### Provider Configuration
 
-Edit `implementations/mcp/shared_config.py` to select your LLM provider:
+**Switching LLM Provider:**
+
+Edit `implementations/mcp/shared_config.py` and change this line:
 
 ```python
-# Choose your provider
-USE_PROVIDER = "openrouter"  # or "anthropic"
+USE_PROVIDER = "openrouter"  # Change to "openai" or "openrouter"
+```
 
-# Models
+**Provider Options:**
+- `"openrouter"` - Use OpenRouter (recommended, no rate limits)
+  - Requires: `OPENROUTER_API_KEY` in `.env`
+  - Model: `anthropic/claude-haiku-4.5`
+  
+- `"openai"` - Use OpenAI directly
+  - Requires: `OPENAI_API_KEY` in `.env`
+  - Model: `gpt-4o-mini`
+
+After changing provider, restart the agents:
+```bash
+./scripts/start_mcp.sh
+```
+
+**Full configuration example:**
+
+```python
+# In implementations/mcp/shared_config.py
+USE_PROVIDER = "openrouter"  # or "anthropic" or "openai"
+
+# Models (automatically set based on provider)
 TAU_USER_MODEL = "anthropic/claude-haiku-4.5"  # For tau-bench user simulation
 TAU_USER_PROVIDER = "openrouter"
 ```
@@ -354,6 +439,121 @@ limits = httpx.Limits(
 
 ---
 
+## Reproducing Tau-Bench Results
+
+This section explains how to reproduce results from the original tau-bench benchmark paper.
+
+### Understanding Tau-Bench Metrics
+
+The original tau-bench evaluates agents on:
+
+- **Retail domain**: 50 customer service tasks
+- **Airline domain**: 50 travel booking tasks
+- **Metrics**: Success rate (reward = 1.0 means task completed correctly)
+
+### Running Standard Tau-Bench Evaluation
+
+**Single Task Evaluation:**
+
+```bash
+# Configure in tau_green_agent_mcp.toml
+[pass_k_config]
+mode = "manual"
+domain = "retail"    # or "airline"
+task_id = 5         # Task index (0-49)
+k = 1               # Single attempt
+
+# Start agents and run battle in AgentBeats UI
+./scripts/start_mcp.sh
+```
+
+**Full Domain Evaluation:**
+
+To evaluate across all 50 tasks in a domain:
+
+```bash
+# Option 1: Run 50 manual evaluations
+# Change task_id from 0 to 49 in tau_green_agent_mcp.toml
+# Run a battle for each task
+
+# Option 2: Use random mode with high num_battles
+[pass_k_config]
+mode = "random"
+num_battles = 50
+k = 1
+```
+
+### Pass@k Evaluation (Extended Metric)
+
+Our implementation adds pass@k evaluation beyond the original benchmark:
+
+```toml
+[pass_k_config]
+mode = "manual"
+domain = "retail"
+task_id = 5
+k = 4               # Run same task 4 times
+```
+
+**Metrics produced:**
+
+- `pass@k`: All k attempts succeed
+- `pass@(k/2)`: Any consecutive k/2 attempts succeed
+- `success_rate`: Percentage of successful attempts
+
+### Comparing to Original Benchmark
+
+The original tau-bench paper reports:
+
+- GPT-4: ~70-80% success rate on retail/airline
+- GPT-3.5: ~40-50% success rate
+
+To compare your agent:
+
+1. Run evaluation on same tasks
+2. Use single attempt (k=1) for fair comparison
+3. Calculate success rate: `(successful_tasks / total_tasks) × 100%`
+4. Compare against published baselines
+
+### Test Cases for Verification
+
+**Quick Sanity Check (3 tasks):**
+
+```bash
+# Edit tau_green_agent_mcp.toml
+mode = "manual"
+k = 1
+
+# Test on: retail task 1, retail task 10, airline task 1
+# Expected: Reasonable agent should get ~2/3 correct
+```
+
+**Standard Test Suite (10 tasks):**
+
+```bash
+mode = "random"
+num_battles = 10
+k = 1
+
+# Run battle in AgentBeats
+# Check success rate in results
+```
+
+### Example Results Interpretation
+
+```
+Results: 4/5 tests passed
+✓ PASS     Tool Registration
+✓ PASS     List Tau-Bench Tools
+✓ PASS     Setup Environment        # ← This validates tau-bench integration
+✓ PASS     Parse XML Tags
+✗ FAIL     Format Evaluation Result
+```
+
+If "Setup Environment" passes, tau-bench is properly configured.
+
+---
+
 ## Troubleshooting
 
 ### Connection Refused
@@ -510,40 +710,7 @@ tau-bench-agents/
 └── README.md                             # This file
 ```
 
----
-
-## Recent Changes
-
-### Code Cleanup (Latest)
-
-**What Changed**:
-
-- ✅ Removed excessive debug logging
-- ✅ Simplified error messages
-- ✅ Fixed all Python linting warnings
-- ✅ Cleaned up import statements
-- ✅ Reduced verbosity while maintaining critical logs
-
-**Performance Improvements**:
-
-- httpx keepalive fully disabled (was partially disabled)
-- Longer delay between attempts (2s, was 0.5s)
-- Agent card cache cleared between attempts
-- Connection limits reduced (max 5, was 10)
-
-### Bug Fixes
-
-**Import Deadlock Fix**:
-
-- Moved all imports to function top
-- Prevents Python's import lock from blocking async operations
-- Fixes non-deterministic hangs
-
-**Connection Stability**:
-
-- Fresh httpx client for every message
-- No connection reuse (keepalive=0)
-- Explicit client closure in finally blocks
+Explicit client closure in finally blocks
 
 ---
 
@@ -607,6 +774,13 @@ task_id = 1
 
 ---
 
-**Ready to start?** Run `./scripts/start_mcp.sh` and create a battle in AgentBeats! 
+**Ready to start?** Run `./scripts/start_mcp.sh` and create a battle in AgentBeats!
 
 For issues or questions, check the logs or refer to the troubleshooting section above.
+
+## **Main Files:**
+
+- `/implementations/mcp/green_agent/` - Green agent (evaluator)
+- `/implementations/mcp/white_agent/` - White agent (target)
+- `/test_mcp_tools.py` - Test suite
+- `/scripts/start_mcp.sh` - Complete startup script
