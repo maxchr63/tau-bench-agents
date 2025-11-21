@@ -7,6 +7,13 @@ This demonstrates how to expose tau-bench evaluation tools via an MCP server
 using the AgentBeats SDK and @ab.tool decorators.
 """
 
+import sys
+from pathlib import Path
+
+# Add parent directory to path so we can import from implementations/
+project_root = Path(__file__).parent.parent
+sys.path.insert(0, str(project_root))
+
 import asyncio
 import logging
 from typing import Any, Dict, List

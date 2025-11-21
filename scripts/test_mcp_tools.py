@@ -6,6 +6,13 @@ Test script for MCP tau-bench tools.
 This script tests that the tools are properly registered and can be called.
 """
 
+import sys
+from pathlib import Path
+
+# Add parent directory to path so we can import from implementations/
+project_root = Path(__file__).parent.parent
+sys.path.insert(0, str(project_root))
+
 import asyncio
 import agentbeats as ab
 

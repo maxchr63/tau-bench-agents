@@ -31,7 +31,7 @@ uv run python main.py green
 **Test Green Agent Evaluation:**
 
 ```bash
-uv run python test_mcp_tools.py
+uv run python scripts/test_mcp_tools.py
 # Tests tau-bench integration and tools
 ```
 
@@ -63,7 +63,7 @@ uv sync
 ./scripts/start_mcp.sh
 
 # Test tools
-uv run python test_mcp_tools.py
+uv run python scripts/test_mcp_tools.py
 ```
 
 ---
@@ -112,7 +112,7 @@ echo "OPENAI_API_KEY=your_key_here" >> .env
 echo "OPENROUTER_API_KEY=your_key_here" >> .env
 
 # 4. Verify installation
-uv run python test_mcp_tools.py
+uv run python scripts/test_mcp_tools.py
 ```
 
 ### Additional hard reset before restart
@@ -600,7 +600,7 @@ tail -f implementations/mcp/green_agent.log
 
 ```bash
 # Use uv run
-uv run python test_mcp_tools.py
+uv run python scripts/test_mcp_tools.py
 
 # Or activate environment
 source .venv/bin/activate
@@ -640,7 +640,7 @@ This will restart the entire stack including AgentBeats backend and frontend.
 ### Run Test Suite
 
 ```bash
-uv run python test_mcp_tools.py
+uv run python scripts/test_mcp_tools.py
 ```
 
 **Expected Output**:
