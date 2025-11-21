@@ -17,11 +17,12 @@ WORKDIR /app
 COPY . /app
 
 # Install dependencies
-# --frozen ensures we use the versions in uv.lock
-RUN uv sync --frozen
+# We remove --frozen because the lock file contains the old local path dependency
+# and we want to resolve the new PyPI dependency
+RUN uv sync
 
 # Expose the controller port
-EXPOSE 8080
+EXPOSE 8010
 
 # Run the controller
 # We use `uv run` to ensure we use the virtual environment
