@@ -18,4 +18,4 @@ dependencies = [
 
 [tool.uv.sources]
 tau-bench = { git = "https://github.com/sierra-research/tau-bench.git" }
-agentbeats = { path = "../agentbeats", editable = true }
+

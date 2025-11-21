@@ -1,0 +1,11 @@
+.git
+.venv
+.env
+__pycache__
+*.pyc
+*.pyo
+*.pyd
+.DS_Store
+implementations/mcp/green_agent.log
+white_agent.log
+

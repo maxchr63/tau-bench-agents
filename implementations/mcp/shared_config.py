@@ -9,7 +9,7 @@ import litellm
 # ============================================================================
 # CENTRAL CONFIGURATION - Change provider here
 # ============================================================================
-USE_PROVIDER = "openrouter"  # Options: "openai" or "openrouter"
+USE_PROVIDER = os.environ.get("USE_PROVIDER", "openrouter")  # Options: "openai" or "openrouter"
 # ============================================================================
 
 print(f"\n{'='*70}")
@@ -18,8 +18,8 @@ print(f"{'='*70}\n")
 
 if USE_PROVIDER == "openrouter":
     # Configure for OpenRouter
-    TAU_USER_MODEL = "openrouter/anthropic/claude-haiku-4.5"  # Free tier model "openrouter/anthropic/claude-haiku-4.5". "openrouter/openai/gpt-5-nano" 
-    TAU_USER_PROVIDER = "openrouter" #openai
+    TAU_USER_MODEL = os.environ.get("TAU_USER_MODEL", "openrouter/anthropic/claude-haiku-4.5")  # Free tier model "openrouter/anthropic/claude-haiku-4.5". "openrouter/openai/gpt-5-nano" 
+    TAU_USER_PROVIDER = os.environ.get("TAU_USER_PROVIDER", "openrouter") #openai
     
     # Set LiteLLM to use OpenRouter endpoint
     litellm.api_base = "https://openrouter.ai/api/v1"
@@ -44,8 +44,8 @@ if USE_PROVIDER == "openrouter":
         
 elif USE_PROVIDER == "openai":
     # Configure for OpenAI (default)
-    TAU_USER_MODEL = "gpt-4o-mini"
-    TAU_USER_PROVIDER = "openai"
+    TAU_USER_MODEL = os.environ.get("TAU_USER_MODEL", "gpt-4o-mini")
+    TAU_USER_PROVIDER = os.environ.get("TAU_USER_PROVIDER", "openai")
     litellm.set_verbose = False
     
     OPENAI_API_KEY = os.environ.get("OPENAI_API_KEY", "")
