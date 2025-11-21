@@ -2,8 +2,7 @@
 """
 Tau-Bench Green Agent Tools
 
-This module exposes tau-bench evaluation tools using the AgentBeats SDK.
-These tools can be used directly by agents or exposed through MCP servers.
+This module exposes tau-bench evaluation tools.
 """
 
 import json
@@ -18,12 +17,12 @@ from typing import Dict, Any, Optional, TYPE_CHECKING
 from implementations.mcp.shared_config import USE_PROVIDER, TAU_USER_MODEL, TAU_USER_PROVIDER
 
 # NOW import tau-bench (after LiteLLM is configured)
-import agentbeats as ab
 from tau_bench.envs import get_env
 from tau_bench.types import RESPOND_ACTION_NAME, Action
 
 # Import AgentCard for type annotation
 from a2a.types import AgentCard
+from a2a.utils import new_agent_text_message
 import httpx  # Pre-import httpx to avoid per-call import overhead/hangs
 
 if TYPE_CHECKING:
@@ -70,7 +69,6 @@ def _get_httpx_client(timeout: float = 120.0) -> "httpx.AsyncClient":
 # COMMUNICATION TOOLS - Using AgentBeats SDK
 # ============================================================================
 
-@ab.tool
 async def send_message_to_white_agent(
     white_agent_url: str,
     message: str,
@@ -175,7 +173,6 @@ async def send_message_to_white_agent(
         }
 
 
-@ab.tool
 async def reset_white_agent(white_agent_url: str, timeout: float = 30.0) -> Dict[str, Any]:
     """
     Reset the white agent's memory state by restarting it via the launcher.
@@ -247,107 +244,77 @@ async def reset_white_agent(white_agent_url: str, timeout: float = 30.0) -> Dict
 
 
 # ============================================================================
-# BATTLE PROGRESS TRACKING - Using AgentBeats SDK
+# BATTLE PROGRESS TRACKING
 # ============================================================================
 
-@ab.tool
 async def log_battle_progress(
     message: str,
-    battle_id: Optional[str] = None,
-    backend_url: Optional[str] = None,
     step: Optional[int] = None,
     total_steps: Optional[int] = None,
-    metadata: Optional[Dict[str, Any]] = None
+    event_queue: Optional[Any] = None
 ) -> str:
     """
-    Log battle progress using AgentBeats logging utilities.
+    Log battle progress.
 
     Args:
         message: Progress message to log
-        battle_id: Battle ID (uses context if not provided)
-        backend_url: Backend URL (uses context if not provided)
         step: Current step number
         total_steps: Total number of steps
-        metadata: Additional metadata to include
+        event_queue: Optional event queue to send message to client
 
     Returns:
         Confirmation message
     """
     try:
-        # Try to use existing battle context first
-        battle_context = ab.get_battle_context()
-
-        if not battle_context and (battle_id and backend_url):
-            # Create new context if needed
-            battle_context = ab.BattleContext(
-                battle_id=battle_id,
-                backend_url=backend_url,
-                agent_name="tau_green_agent_mcp"
+        log_msg = f"Battle progress: {message}"
+        if step is not None and total_steps is not None:
+            log_msg = f"Step {step}/{total_steps}: {message}"
+        
+        logger.info(log_msg)
+        
+        if event_queue:
+            await event_queue.enqueue_event(
+                new_agent_text_message(log_msg)
             )
-            ab.set_battle_context(battle_context)
-
-        if battle_context:
-            detail = metadata or {}
-            if step is not None and total_steps is not None:
-                detail["step"] = step
-                detail["total_steps"] = total_steps
-
-            ab.record_battle_event(battle_context, message, detail)
-            return f"Logged: {message}"
-        else:
-            # Fallback to regular logging
-            logger.info(f"Battle progress: {message}")
-            return f"Logged locally: {message}"
+            return f"Logged to event queue: {message}"
+            
+        return f"Logged locally: {message}"
 
     except Exception as e:
         logger.error(f"Error logging battle progress: {e}")
         return f"Error logging: {str(e)}"
 
 
-@ab.tool
 async def report_battle_result(
     success: bool,
     message: str,
     metrics: Optional[Dict[str, Any]] = None,
-    battle_id: Optional[str] = None,
-    backend_url: Optional[str] = None
+    event_queue: Optional[Any] = None
 ) -> str:
     """
-    Report final battle result using AgentBeats logging utilities.
+    Report final battle result.
 
     Args:
         success: Whether the evaluation succeeded
         message: Result message
         metrics: Evaluation metrics
-        battle_id: Battle ID (uses context if not provided)
-        backend_url: Backend URL (uses context if not provided)
+        event_queue: Optional event queue to send message to client
 
     Returns:
         Confirmation message
     """
     try:
-        battle_context = ab.get_battle_context()
-
-        if not battle_context and (battle_id and backend_url):
-            battle_context = ab.BattleContext(
-                battle_id=battle_id,
-                backend_url=backend_url,
-                agent_name="tau_green_agent_mcp"
+        logger.info(f"Battle result: {message}")
+        if metrics:
+            logger.info(f"Metrics: {metrics}")
+            
+        if event_queue:
+            await event_queue.enqueue_event(
+                new_agent_text_message(f"{message}\nMetrics: {metrics or {}}")
             )
-            ab.set_battle_context(battle_context)
-
-        if battle_context:
-            winner = "white" if success else "green"
-            detail = {
-                "metrics": metrics or {},
-                "success": success
-            }
-
-            ab.record_battle_result(battle_context, message, detail)
-            return f"Battle result reported: {winner} wins"
-        else:
-            logger.info(f"Battle result: {message}")
-            return f"Logged locally: {message}"
+            return "Reported to event queue"
+            
+        return f"Logged locally: {message}"
 
     except Exception as e:
         logger.error(f"Error reporting battle result: {e}")
@@ -358,7 +325,6 @@ async def report_battle_result(
 # TAU-BENCH ENVIRONMENT TOOLS
 # ============================================================================
 
-@ab.tool
 async def setup_tau_bench_environment(
     env_name: str = "retail",
     user_strategy: str = "llm",
@@ -418,7 +384,6 @@ async def setup_tau_bench_environment(
         }
 
 
-@ab.tool
 def get_tau_bench_tools_as_json(task_id: int = 5) -> str:
     """
     Get tau-bench tools as JSON string for easy sharing with agents.
@@ -446,7 +411,6 @@ def get_tau_bench_tools_as_json(task_id: int = 5) -> str:
         return json.dumps({"error": str(e)})
 
 
-@ab.tool
 def list_tau_bench_tools(task_id: int = 5) -> str:
     """
     List all available tau-bench tools for a given task.
@@ -490,7 +454,6 @@ def list_tau_bench_tools(task_id: int = 5) -> str:
 # EVALUATION ORCHESTRATION TOOLS
 # ============================================================================
 
-@ab.tool
 async def evaluate_white_agent(
     white_agent_url: str,
     task_id: int = 5,
@@ -511,7 +474,7 @@ async def evaluate_white_agent(
     """
     from a2a.types import SendMessageSuccessResponse, Message
     from a2a.utils import get_text_parts
-    from src.my_util import parse_tags
+    # from src.my_util import parse_tags
 
     logger.info(f"Starting evaluation of {white_agent_url} on task {task_id}")
 
@@ -683,9 +646,9 @@ User message:
 # UTILITY TOOLS
 # ============================================================================
 
-def _parse_tags_helper(str_with_tags: str) -> dict:
+def parse_tags(str_with_tags: str) -> dict:
     """
-    Internal helper to parse XML-style tags from text.
+    Parse XML-style tags from text.
     Tags are in the format <tag_name>...</tag_name>
     
     Returns dict with tag names as keys and content as values.
@@ -695,7 +658,6 @@ def _parse_tags_helper(str_with_tags: str) -> dict:
     return {tag: content.strip() for tag, content in tags}
 
 
-@ab.tool
 def parse_xml_tags(text: str, tag: str) -> str:
     """
     Parse XML-style tags from text.
@@ -708,14 +670,13 @@ def parse_xml_tags(text: str, tag: str) -> str:
         Content within the specified tags, or empty string if not found
     """
     try:
-        tags = _parse_tags_helper(text)
+        tags = parse_tags(text)
         return tags.get(tag, "")
     except Exception as e:
         logger.error(f"Error parsing tags: {e}")
         return ""
 
 
-@ab.tool
 def format_evaluation_result(
     success: bool,
     reward: float,
@@ -773,7 +734,6 @@ def format_evaluation_result(
 # PASS@K EVALUATION TOOLS
 # ============================================================================
 
-@ab.tool
 async def evaluate_agent_with_pass_k(
     white_agent_url: str,
     domain: str,
@@ -781,8 +741,7 @@ async def evaluate_agent_with_pass_k(
     k: int = 4,
     max_num_steps: int = 30,
     reset_between_attempts: bool = True,
-    battle_id: Optional[str] = None,
-    backend_url: Optional[str] = None
+    event_queue: Optional[Any] = None
 ) -> Dict[str, Any]:
     """
     Evaluate white agent with k independent attempts on a task.
@@ -798,8 +757,8 @@ async def evaluate_agent_with_pass_k(
         task_id: Task ID within the domain
         k: Number of attempts (must be even)
         max_num_steps: Maximum steps per attempt
-        battle_id: Optional battle ID for AgentBeats logging
-        backend_url: Optional backend URL for AgentBeats logging
+        reset_between_attempts: Whether to reset white agent between attempts
+        event_queue: Optional event queue for logging
 
     Returns:
         Dict with pass^k metrics, attempt details, and failure analysis
@@ -812,19 +771,9 @@ async def evaluate_agent_with_pass_k(
 
     logger.info(f"=== Starting pass@k evaluation: domain={domain}, task={task_id}, k={k} ===")
 
-    # Set up battle context for logging
-    battle_context = None
-    if battle_id and backend_url:
-        battle_context = ab.BattleContext(
-            battle_id=battle_id,
-            backend_url=backend_url,
-            agent_name="tau_green_agent_mcp"
-        )
-        ab.set_battle_context(battle_context)
-        ab.record_battle_event(
-            battle_context,
-            f"Starting pass@{k} evaluation",
-            {"domain": domain, "task_id": task_id, "k": k}
+    if event_queue:
+        await event_queue.enqueue_event(
+            new_agent_text_message(f"Starting pass@{k} evaluation on {domain} task {task_id}")
         )
 
     # Set up tau-bench environment
@@ -862,11 +811,9 @@ async def evaluate_agent_with_pass_k(
                 logger.warning(f"[RESET] Warning: Reset failed (continuing anyway): {e}")
                 print(f"[RESET] Warning: Reset exception (continuing anyway): {e}", file=sys.stderr, flush=True)
 
-        if battle_context:
-            ab.record_battle_event(
-                battle_context,
-                f"🔄 Starting attempt {attempt_num + 1}/{k}...",
-                {}
+        if event_queue:
+            await event_queue.enqueue_event(
+                new_agent_text_message(f"🔄 Starting attempt {attempt_num + 1}/{k}...")
             )
 
         timestamp_started = time.time()
@@ -1027,75 +974,16 @@ User message: {obs}
             _card_cache_url = None
             await asyncio.sleep(2.0)
 
-        if battle_context:
-            # Build detailed failure message for UI
+        if event_queue:
+            # Build detailed failure message
             event_message = f"{result_emoji} Attempt {attempt_num + 1}/{k}: {'SUCCESS' if success else 'FAILED'}"
-
-            event_detail = {
-                "reward": reward,
-                "steps": steps_in_attempt,
-                "time": f"{time_used:.2f}s",
-                "error": attempt_error
-            }
-
-            # Add comprehensive failure details to event
+            
             if not success and failure_detail:
-                # Core categorization
-                event_detail["failure_category"] = failure_detail["category"]
-                event_detail["fault_author"] = failure_detail.get("fault_author", "unknown")
-                event_detail["fault_type"] = failure_detail.get("fault_type", "other")
-                event_detail["description"] = failure_detail.get("description", "")
-
-                # Scores
-                if failure_detail.get("action_score") is not None:
-                    event_detail["action_score"] = failure_detail["action_score"]
-                if failure_detail.get("output_score") is not None:
-                    event_detail["output_score"] = failure_detail["output_score"]
-
-                # Database state analysis
-                if failure_detail.get("database_state_match") is not None:
-                    event_detail["database_state_match"] = failure_detail["database_state_match"]
-                if failure_detail.get("ground_truth_actions"):
-                    event_detail["expected_num_actions"] = len(failure_detail["ground_truth_actions"])
-
-                # Output analysis
-                if failure_detail.get("missing_outputs"):
-                    event_detail["missing_outputs"] = failure_detail["missing_outputs"]
-                if failure_detail.get("provided_outputs"):
-                    event_detail["provided_outputs"] = failure_detail["provided_outputs"]
-
-                # Task context
-                if failure_detail.get("task_instruction"):
-                    event_detail["task_instruction"] = failure_detail["task_instruction"]
-
-                # Build rich human-readable message
                 event_message += f"\n   🔍 **{failure_detail['category']}**"
                 if failure_detail.get("description"):
                     event_message += f"\n   💬 {failure_detail['description']}"
-
-                # Add fault attribution
-                fault_author_emoji = {
-                    "agent": "🤖",
-                    "user": "👤",
-                    "environment": "⚙️",
-                    "unknown": "❓"
-                }
-                event_message += f"\n   {fault_author_emoji.get(failure_detail.get('fault_author', 'unknown'), '❓')} Fault: {failure_detail.get('fault_author', 'unknown')}"
-
-                # Add fault type
-                fault_type_labels = {
-                    "called_wrong_tool": "Called Wrong Tool",
-                    "used_wrong_tool_argument": "Wrong Tool Arguments",
-                    "goal_partially_completed": "Goal Partially Completed",
-                    "other": "Other"
-                }
-                event_message += f" | Type: {fault_type_labels.get(failure_detail.get('fault_type', 'other'), 'Other')}"
-
-            ab.record_battle_event(
-                battle_context,
-                event_message,
-                event_detail
-            )
+            
+            await event_queue.enqueue_event(new_agent_text_message(event_message))
 
     # Calculate pass^k metrics
     success_flags = [a["success"] for a in attempts]
@@ -1149,13 +1037,23 @@ User message: {obs}
     logger.info(f"Success rate: {success_rate:.1%} ({num_successes}/{k})")
     logger.info(f"Average steps on success: {avg_steps:.1f}")
 
-    # Report detailed breakdown to AgentBeats with a safety timeout
-    if battle_context:
+    # Report detailed breakdown with a safety timeout
+    if event_queue:
         import asyncio as _asyncio
         try:
-            await _asyncio.wait_for(report_pass_k_results(results, battle_context), timeout=20.0)
-        except _asyncio.TimeoutError:
-            logger.warning("[FINALIZE] Reporting results to AgentBeats timed out after 20s; returning results anyway.")
+            # Since report_pass_k_results was also heavily AgentBeats dependent,
+            # we'll just use a simplified reporting here or refactor it separately.
+            # For now, let's rely on the per-attempt logging we added above and the final summary.
+            summary_msg = (
+                f"=== Pass@k Evaluation Complete ===\n"
+                f"pass^{k}: {pass_k}\n"
+                f"pass^{k_half}: {pass_k_half}\n"
+                f"Success rate: {success_rate:.1%}\n"
+                f"Avg steps: {avg_steps:.1f}"
+            )
+            await event_queue.enqueue_event(new_agent_text_message(summary_msg))
+        except Exception as e:
+            logger.warning(f"[FINALIZE] Reporting results failed: {e}")
 
     return results
 
@@ -1488,154 +1386,5 @@ def categorize_failure(info: Dict[str, Any], error: Optional[str]) -> str:
     return details["category"]
 
 
-async def report_pass_k_results(
-    results: Dict[str, Any],
-    battle_context: ab.BattleContext
-) -> None:
-    """
-    Report detailed pass@k results to AgentBeats UI.
+# Removed report_pass_k_results as it depended on AgentBeats context
 
-    Args:
-        results: Pass@k evaluation results
-        battle_context: AgentBeats battle context
-    """
-    k = results["k"]
-    k_half = k // 2
-
-    # Create visual attempt history
-    attempt_visual = "".join(
-        "✅" if a["success"] else "❌"
-        for a in results["attempts"]
-    )
-
-    # Build detailed message
-    lines = [
-        "# 📊 Pass@k Evaluation Results",
-        "",
-        f"**Domain**: {results['domain']} | **Task**: {results['task_id']}",
-        "",
-        f"## Attempts ({k} total)",
-        f"{attempt_visual}",
-        "",
-        "## Metrics",
-        f"- **pass^{k}**: {'✅ PASS' if results['pass_k'] else '❌ FAIL'} (all first {k} attempts must succeed)",
-        f"- **pass^{k_half}**: {'✅ PASS' if results['pass_k_half'] else '❌ FAIL'} (any {k_half} consecutive successes)",
-        f"- **Success Rate**: {results['success_rate']:.1%} ({results['num_successes']}/{k} successful)",
-        f"- **Avg Steps on Success**: {results['avg_steps_on_success']:.1f}",
-        f"- **Total Steps**: {results['total_steps']}",
-        ""
-    ]
-
-    # Add failure breakdown if any failures
-    if results["failure_breakdown"]:
-        lines.append("## Failure Breakdown by Category")
-        for reason, count in sorted(results["failure_breakdown"].items(), key=lambda x: -x[1]):
-            lines.append(f"- **{reason}**: {count} occurrence(s)")
-        lines.append("")
-
-        # Add fault author breakdown
-        fault_authors = {}
-        fault_types = {}
-        for attempt in results["attempts"]:
-            if not attempt["success"] and attempt.get("failure_detail"):
-                author = attempt["failure_detail"].get("fault_author", "unknown")
-                fault_type = attempt["failure_detail"].get("fault_type", "other")
-                fault_authors[author] = fault_authors.get(author, 0) + 1
-                fault_types[fault_type] = fault_types.get(fault_type, 0) + 1
-
-        if fault_authors:
-            lines.append("## Fault Author Distribution")
-            for author, count in sorted(fault_authors.items(), key=lambda x: -x[1]):
-                author_emoji = {"agent": "🤖", "user": "👤", "environment": "⚙️", "unknown": "❓"}.get(author, "❓")
-                lines.append(f"- {author_emoji} **{author.capitalize()}**: {count} occurrence(s)")
-            lines.append("")
-
-        if fault_types:
-            lines.append("## Fault Type Distribution")
-            fault_type_labels = {
-                "called_wrong_tool": "Called Wrong Tool",
-                "used_wrong_tool_argument": "Wrong Tool Arguments",
-                "goal_partially_completed": "Goal Partially Completed",
-                "other": "Other"
-            }
-            for fault_type, count in sorted(fault_types.items(), key=lambda x: -x[1]):
-                label = fault_type_labels.get(fault_type, fault_type)
-                lines.append(f"- **{label}**: {count} occurrence(s)")
-            lines.append("")
-
-    # Add per-attempt details with rich failure information
-    lines.append("## Attempt Details")
-    for attempt in results["attempts"]:
-        emoji = "✅" if attempt["success"] else "❌"
-        lines.append(
-            f"{emoji} **Attempt {attempt['attempt']}**: "
-            f"{'Success' if attempt['success'] else 'Failed'} "
-            f"(steps={attempt['steps']}, time={attempt['time']:.1f}s)"
-        )
-
-        # Add comprehensive failure information
-        if not attempt["success"]:
-            failure_detail = attempt.get("failure_detail", {})
-
-            if attempt["error"]:
-                lines.append(f"   ↳ **Error**: {attempt['error']}")
-
-            if failure_detail:
-                # Category and description
-                category = failure_detail.get("category", "unknown")
-                description = failure_detail.get("description", "")
-                lines.append(f"   ↳ **Category**: {category}")
-                if description:
-                    lines.append(f"   ↳ **Description**: {description}")
-
-                # Fault attribution
-                fault_author = failure_detail.get("fault_author", "unknown")
-                fault_type = failure_detail.get("fault_type", "other")
-                fault_author_emoji = {"agent": "🤖", "user": "👤", "environment": "⚙️", "unknown": "❓"}.get(fault_author, "❓")
-                fault_type_label = {
-                    "called_wrong_tool": "Called Wrong Tool",
-                    "used_wrong_tool_argument": "Wrong Tool Arguments",
-                    "goal_partially_completed": "Goal Partially Completed",
-                    "other": "Other"
-                }.get(fault_type, fault_type)
-                lines.append(f"   ↳ {fault_author_emoji} **Fault**: {fault_author} | **Type**: {fault_type_label}")
-
-                # Score breakdown
-                action_score = failure_detail.get("action_score")
-                output_score = failure_detail.get("output_score")
-                if action_score is not None:
-                    lines.append(f"   ↳ **Action Score (r_actions)**: {action_score} (database state {'✅ correct' if action_score == 1.0 else '❌ wrong'})")
-                if output_score is not None:
-                    lines.append(f"   ↳ **Output Score (r_outputs)**: {output_score}")
-
-                # Output analysis
-                missing = failure_detail.get("missing_outputs", [])
-                provided = failure_detail.get("provided_outputs", [])
-                expected = failure_detail.get("expected_outputs", [])
-
-                if expected:
-                    lines.append(f"   ↳ **Expected outputs**: {', '.join(expected) if expected else 'None'}")
-                if provided:
-                    lines.append(f"   ↳ **Provided outputs**: {', '.join(provided)}")
-                if missing:
-                    lines.append(f"   ↳ **Missing outputs**: {', '.join(missing)}")
-
-                # Ground truth actions
-                gt_actions = failure_detail.get("ground_truth_actions", [])
-                if gt_actions:
-                    lines.append(f"   ↳ **Expected # of actions**: {len(gt_actions)}")
-
-                # Task instruction (first 150 chars)
-                task_inst = failure_detail.get("task_instruction")
-                if task_inst:
-                    task_preview = task_inst[:150] + "..." if len(task_inst) > 150 else task_inst
-                    lines.append(f"   ↳ **Task**: {task_preview}")
-
-    message = "\n".join(lines)
-
-    # Report to AgentBeats
-    ab.record_battle_event(
-        battle_context,
-        message,
-        results
-    )

@@ -2,7 +2,10 @@
 
 # CRITICAL: Import shared config FIRST to configure LiteLLM globally
 import sys
-sys.path.insert(0, '/Users/max/Documents/Uni/Berkeley/agentic_ai/tau-bench-agents')
+from pathlib import Path
+_project_root = str(Path(__file__).parent.parent.parent)
+if _project_root not in sys.path:
+    sys.path.insert(0, _project_root)
 from implementations.mcp.shared_config import TAU_USER_MODEL, TAU_USER_PROVIDER
 
 import logging
@@ -188,7 +191,7 @@ class GeneralWhiteAgentExecutor(AgentExecutor):
         print("[SECURITY] White agent memory completely cleared (reset called)")
 
 
-def start_white_agent(agent_name="general_white_agent", host="localhost", port=9004):
+def start_white_agent(agent_name="general_white_agent", host="localhost", port=9004, **kwargs):
     # FORCE logging configuration for white agent
     # Clear any existing handlers and configure fresh
     root_logger = logging.getLogger()
@@ -219,6 +222,10 @@ def start_white_agent(agent_name="general_white_agent", host="localhost", port=9
     
     print("Starting white agent...")
     logger.info("Starting white agent...")
+
+    if kwargs:
+        print(f"White agent received additional kwargs: {kwargs}")
+
     url = f"http://{host}:{port}"
     card = prepare_white_agent_card(url)
 
