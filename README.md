@@ -297,7 +297,7 @@ mode = "manual"
 domain = "retail"
 task_id = 1
 
-# Automatic random task selection mode: Run all tasks in domain
+# Random task selection mode: Run all tasks in domain
 mode = "random"
 domain = "retail"
 ```
