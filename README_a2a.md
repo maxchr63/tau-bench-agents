@@ -8,21 +8,27 @@ Example code for agentifying Tau-Bench using A2A and MCP standards.
 uv sync
 ```
 
-### 0. Add API keys
+### 0. Add API Keys
 
-First, configure `.env` with
-`ANTHROPIC_API_KEY=` or
-`OPENAI_API_KEY=...`,  (currently setup for open ai api keys)
-The model and provider used can be changed by changing the task, completion and env confing in the respective agent.py files
-(only uncommenting needed)
+Configure `.env` with your API keys:
+
+```bash
+ANTHROPIC_API_KEY=your_key_here
+# OR
+OPENAI_API_KEY=your_key_here
+# OR
+OPENROUTER_API_KEY=your_key_here
+```
+
+The model and provider can be changed in the respective `agent.py` files by modifying the task, completion, and env config sections.
 
 ## 1.  Start AgentBeats
 
 Open a new terminal and execute the following commands:
 
-```shell
-# Navigate to AgentBeats directory best into the cloned repo (could be different)
-cd ~/Projects/agentbeats
+```bash
+# Navigate to AgentBeats directory
+cd /path/to/agentbeats
 
 # Create and activate virtual environment with Python 3.11
 python3.11 -m venv venv
@@ -31,7 +37,7 @@ source venv/bin/activate
 # Install AgentBeats
 pip install -e .
 
-# Create a .env file
+# Create .env file with API keys
 touch .env
 echo "OPENROUTER_API_KEY=your-openrouter-api-key" >> .env
 echo "OPENAI_API_KEY=your-openai-api-key" >> .env
@@ -43,41 +49,50 @@ agentbeats install_frontend --webapp_version webapp-v2
 agentbeats deploy
 ```
 
-Now, you can access the AgentBeats UI at** **[http://localhost:5173](http://localhost:5173/)
+Access the AgentBeats UI at [http://localhost:5173](http://localhost:5173)
 
-## 2.  and restart Agents:
+## 2. Start and Restart Agents
 
-This is the way you need to launch the agents, if you want to launch them for agentbeats web-appp
+### For AgentBeats Web UI
 
-```shell
+This is the recommended way to launch agents for the AgentBeats web application:
+
+```bash
+# Clean up any running processes
 pkill -f 'python main.py'
 pkill -f 'python.*launcher'
-cd /Users/max/Documents/Uni/Berkeley/agentic_ai/tau-bench-agents
-./start_launchers.sh
+
+# Navigate to tau-bench-agents
+cd /path/to/tau-bench-agents
+
+# Start A2A agents
+./scripts/start_a2a.sh
 ```
 
-I you just want to tun a battle in the terminal, lauching the main in combiation with the terminal launcher is the way to go
+### For Terminal-Only Testing
+
+If you want to run a battle in the terminal without the web UI:
 
 ```bash
-uv run python main.py launch
-
+uv run python main.py green   # Start green agent
+uv run python main.py white   # Start white agent (in separate terminal)
 ```
 
-## 3. Change Configeration parameters:
+## 3. Change Configuration Parameters
 
-can be done in `tau-bench-agents/src/green_agent/agent.py`
+Configuration can be modified in `implementations/a2a/green_agent/agent.py`:
 
-task id sets the current task thats evaluated from tau-bench and the ratil that it is supposed to be a retail task
+The `task_id` sets the current task evaluated from tau-bench, and `env` specifies the domain:
 
-```bash
+```python
 env_config = {
-        "env": "retail",
-        "user_strategy": "llm",
-        "user_model": "gpt-5",  # Changed to GPT-5
-        "user_provider": "openai",
-        "task_split": "test",
-        "task_ids": [1],
-        }
+    "env": "retail",
+    "user_strategy": "llm",
+    "user_model": "gpt-4o",
+    "user_provider": "openai",
+    "task_split": "test",
+    "task_ids": [1],
+}
 ```
 
 ## 3. Design Philosophy

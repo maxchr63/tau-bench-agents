@@ -552,7 +552,7 @@ class TauGreenAgentExecutor(AgentExecutor):
         pass
 
 
-def start_green_agent(agent_name="tau_green_agent_mcp", host="localhost", port=9003):
+def start_green_agent(agent_name="tau_green_agent_mcp", host="localhost", port=9006):
     """
     Start the green agent server.
 

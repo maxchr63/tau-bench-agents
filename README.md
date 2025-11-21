@@ -10,23 +10,74 @@ An MCP-ready implementation of τ-bench integration for AgentBeats, featuring mo
 # Install dependencies
 uv sync
 
+# Configure API keys (see Installation section)
 # Start agents
 ./scripts/start_mcp.sh
 
-# Test
-uv run python test_refactored_tools.py
+# Test tools
+uv run python test_mcp_tools.py
 ```
 
 ---
 
 ## Table of Contents
 
-- [Architecture Overview](#architecture-overview)
 - [Installation](#installation)
+- [Architecture Overview](#architecture-overview)
 - [Configuration](#configuration)
+- [Running Locally](#running-locally)
 - [Pass@k Evaluation](#passk-evaluation)
 - [Testing on AgentBeats](#testing-on-agentbeats)
 - [Troubleshooting](#troubleshooting)
+
+---
+
+## Installation
+
+### Prerequisites
+
+- Python 3.11 or higher
+- uv (recommended) or pip
+- AgentBeats repository at `../agentbeats`
+
+### Setup Steps
+
+```bash
+# 1. Navigate to project
+cd /path/to/tau-bench-agents
+
+# 2. Install with uv (recommended)
+uv sync
+
+# OR install with pip
+python -m venv .venv
+source .venv/bin/activate
+pip install -e ../agentbeats
+pip install a2a-sdk[http-server] anthropic dotenv tau-bench typer uvicorn
+
+# 3. Configure API keys
+touch .env
+echo "ANTHROPIC_API_KEY=your_key_here" >> .env
+echo "OPENAI_API_KEY=your_key_here" >> .env
+# OR use OpenRouter (recommended for avoiding rate limits)
+echo "OPENROUTER_API_KEY=your_key_here" >> .env
+
+# 4. Verify installation
+uv run python test_mcp_tools.py
+```
+
+### Provider Configuration
+
+Edit `implementations/mcp/shared_config.py` to select your LLM provider:
+
+```python
+# Choose your provider
+USE_PROVIDER = "openrouter"  # or "anthropic"
+
+# Models
+TAU_USER_MODEL = "anthropic/claude-haiku-4.5"  # For tau-bench user simulation
+TAU_USER_PROVIDER = "openrouter"
+```
 
 ---
 
@@ -57,8 +108,8 @@ uv run python test_refactored_tools.py
 
 ### Port Mapping
 
-| Component              | Port | URL                   | Purpose                |
-| ---------------------- | ---- | --------------------- | ---------------------- |
+| Component                    | Port | URL                   | Purpose                |
+| ---------------------------- | ---- | --------------------- | ---------------------- |
 | **MCP Green Launcher** | 9111 | http://localhost:9111 | FastAPI control server |
 | **MCP Green Agent**    | 9006 | http://localhost:9006 | A2A agent server       |
 | **White Launcher**     | 9210 | http://localhost:9210 | FastAPI control server |
@@ -66,69 +117,71 @@ uv run python test_refactored_tools.py
 
 ---
 
-## Installation
+## Running Locally
 
-### Prerequisites
+You can run the agents locally in two ways:
 
-- Python 3.11 or higher
-- uv (recommended) or pip
-- AgentBeats repository at `../agentbeats`
+### Option 1: With AgentBeats Web UI (Recommended)
 
-### Setup Steps
+This is the standard way to run agents with the AgentBeats interface.
+
+**Step 1: Start AgentBeats**
 
 ```bash
-# 1. Navigate to project
-cd /path/to/tau-bench-agents
+# Navigate to AgentBeats directory
+cd /path/to/agentbeats
 
-# 2. Install with uv (recommended)
-uv sync
+# Create and activate virtual environment
+python3.11 -m venv venv
+source venv/bin/activate
 
-# OR install with pip
-python -m venv .venv
-source .venv/bin/activate
-pip install -e ../agentbeats
-pip install a2a-sdk[http-server] anthropic dotenv tau-bench typer uvicorn
+# Install AgentBeats
+pip install -e .
 
-# 3. Verify installation
-uv run python test_refactored_tools.py
+# Install frontend
+agentbeats install_frontend --webapp_version webapp-v2
+
+# Launch AgentBeats
+agentbeats deploy
 ```
 
-### Configuration
+Access the UI at [http://localhost:5173](http://localhost:5173)
 
-Create a `.env` file with required API keys:
+**Step 2: Start Tau-Bench Agents**
 
 ```bash
-# OpenRouter (recommended for avoiding rate limits)
-OPENROUTER_API_KEY=your_key_here
+# In a new terminal, navigate to tau-bench-agents
+cd /path/to/tau-bench-agents
 
-# Or use Anthropic directly
-ANTHROPIC_API_KEY=your_key_here
+# Start MCP agents
+./scripts/start_mcp.sh
+```
+
+**Step 3: Register Agents in UI**
+
+Register the agents in AgentBeats UI (see [Testing on AgentBeats](#testing-on-agentbeats))
+
+### Option 2: Terminal Only (For Development)
+
+Run evaluations directly from the command line without the web UI.
+
+```bash
+# Start agents via main.py
+uv run python main.py green   # Green agent on port 9006
+uv run python main.py white   # White agent on port 9004
 ```
 
 ---
 
 ## Configuration
 
-### Provider Configuration
-
-Edit `implementations/mcp/shared_config.py` to select your LLM provider:
-
-```python
-# Choose your provider
-USE_PROVIDER = "openrouter"  # or "anthropic"
-
-# Models
-TAU_USER_MODEL = "anthropic/claude-haiku-4.5"  # For tau-bench user simulation
-TAU_USER_PROVIDER = "openrouter"
-```
-
 ### Pass@k Configuration
 
-Edit `implementations/mcp/green_agent/tau_green_agent_mcp.toml`:
+Edit `implementations/mcp/green_agent/tau_green_agent_mcp.toml`
 
 ```toml
 [pass_k_config]
-mode = "manual"           # "manual" or "automatic"
+mode = "manual"           # "manual" or "random"
 k = 2                     # Number of attempts (use 2 for stability)
 domain = "retail"         # "retail" or "airline"
 task_id = 1              # Task ID to evaluate
@@ -151,7 +204,7 @@ Pass@k evaluation runs multiple independent attempts of the same task to measure
 
 ### Configuration Options
 
-#### Mode: manual vs automatic
+#### Mode: manual vs random
 
 ```toml
 # Manual mode: Specify exact domain and task_id
@@ -159,8 +212,8 @@ mode = "manual"
 domain = "retail"
 task_id = 1
 
-# Automatic mode: Run all tasks in domain
-mode = "automatic"
+# Automatic random task selection mode: Run all tasks in domain
+mode = "random"
 domain = "retail"
 ```
 
@@ -176,6 +229,18 @@ k = 2  # Recommended for stable evaluation
 2. **White Agent Reset**: Between attempts, the white agent is optionally reset for fresh state
 3. **Independent Evaluation**: Each attempt runs completely independently
 4. **Aggregated Results**: Final metrics show pass@k, pass@(k/2), and detailed failure analysis
+
+### Preventing Context Leakage Between Attempts
+
+To ensure fair evaluation and prevent the white agent from "cheating" by reusing information from previous attempts:
+
+**Unique Context IDs**: Each pass@k attempt generates a fresh context ID (e.g., `attempt_1_a3f2b9c4`, `attempt_2_d7e1f8a2`). The white agent's A2A server treats each context as an independent conversation thread, preventing conversation history from leaking between attempts.
+
+**Optional Agent Reset**: The configuration supports `reset_between_attempts` (disabled by default) which restarts the white agent process entirely between attempts. This clears any in-memory state, caches, or context that might persist across evaluations.
+
+**Environment Reset**: Before each attempt, the tau-bench environment is reset with `env.reset(task_index=task_id)`, generating fresh task instances, user messages, and database states to ensure each attempt is independent.
+
+This multi-layered approach ensures that each pass@k attempt is a genuine independent evaluation, measuring the agent's consistent performance rather than its ability to remember previous interactions.
 
 ### Example Output
 
@@ -200,11 +265,26 @@ Attempt Details:
 ./scripts/start_mcp.sh
 ```
 
-This will:
+This script will:
+
 - Clean up old processes on ports 9006, 9004, 9111, 9210
 - Start MCP green launcher on port 9111
 - Start white launcher on port 9210
 - Launch both agents automatically
+
+**Manual Cleanup (if needed):**
+
+If the script doesn't automatically clean up old processes:
+
+```bash
+# Kill launcher processes
+pkill -f 'python.*launcher'
+
+# Kill processes on specific ports
+for port in 9006 9004 9111 9210; do
+  lsof -ti:$port 2>/dev/null | xargs kill -9 2>/dev/null
+done
+```
 
 ### Step 2: Verify Status
 
@@ -216,6 +296,9 @@ curl http://localhost:9210/health  # White launcher
 # Check agent cards
 curl http://localhost:9006/.well-known/agent-card.json
 curl http://localhost:9004/.well-known/agent-card.json
+
+# Or use the status script
+./scripts/check_status.sh
 ```
 
 ### Step 3: Register in AgentBeats UI
@@ -223,12 +306,14 @@ curl http://localhost:9004/.well-known/agent-card.json
 Open AgentBeats UI (typically http://localhost:5173):
 
 **White Agent (Target):**
+
 - Agent URL: `http://localhost:9004`
 - Launcher URL: `http://localhost:9210`
 - Is Green?: ❌ No
 - Alias: `tau_white_agent`
 
 **MCP Green Agent (Evaluator):**
+
 - Agent URL: `http://localhost:9006`
 - Launcher URL: `http://localhost:9111`
 - Is Green?: ✅ Yes
@@ -237,6 +322,7 @@ Open AgentBeats UI (typically http://localhost:5173):
 ### Step 4: Create Battle
 
 In AgentBeats UI:
+
 1. Click "Create Battle"
 2. Select `tau_green_agent_mcp` (green agent/evaluator)
 3. Select `tau_white_agent` (white agent/target)
@@ -245,6 +331,7 @@ In AgentBeats UI:
 ---
 
 **Workarounds Implemented**:
+
 1. Fresh httpx client for each message (keepalive disabled)
 2. Agent card cache clearing between attempts
 3. 2-second delay between attempts
@@ -253,28 +340,10 @@ In AgentBeats UI:
 
 **Future Work**: This likely requires fixes in the A2A SDK itself or deeper async event loop debugging.
 
-### Import Deadlocks (Fixed ✅)
-
-**Issue**: Imports inside async loops could cause deadlocks
-
-**Fix**: All imports moved to function/file top:
-```python
-# ✅ Good - imports at top
-from a2a.utils import get_text_parts
-
-async def evaluate():
-    # Use imported function
-    text_parts = get_text_parts(parts)
-
-# ❌ Bad - import inside loop
-async def evaluate():
-    for step in range(max_steps):
-        from a2a.utils import get_text_parts  # Deadlock risk!
-```
-
 ### HTTP Connection Limits
 
 **Configuration**: httpx client settings optimized for stability:
+
 ```python
 limits = httpx.Limits(
     max_keepalive_connections=0,   # Disabled for stability
@@ -292,6 +361,7 @@ limits = httpx.Limits(
 **Symptom**: Cannot connect to agent/launcher
 
 **Solutions**:
+
 ```bash
 # Restart everything
 ./scripts/start_mcp.sh
@@ -304,11 +374,13 @@ curl http://localhost:9210/health
 ### Evaluation Hangs
 
 **Symptoms**:
+
 - Green agent log stops updating
 - White agent completes requests but no progress
 - Stuck at "Sending to white agent"
 
 **Solutions**:
+
 ```bash
 # 1. Reduce k value in tau_green_agent_mcp.toml
 k = 2  # Down from 3 or 4
@@ -325,27 +397,41 @@ tail -f implementations/mcp/green_agent.log
 **Symptom**: `ModuleNotFoundError: agentbeats`
 
 **Solutions**:
+
 ```bash
 # Use uv run
-uv run python test_refactored_tools.py
+uv run python test_mcp_tools.py
 
 # Or activate environment
 source .venv/bin/activate
-python test_refactored_tools.py
+python test_mcp_tools.py
 ```
 
 ### Ports Already in Use
 
 **Solution**:
+
 ```bash
 # The start_mcp.sh script handles this automatically
 ./scripts/start_mcp.sh
 
-# Or if you need to kill the agents manually :
+# Manual cleanup if needed:
+pkill -f 'python.*launcher'
+
 for port in 9006 9004 9111 9210; do
   lsof -ti:$port 2>/dev/null | xargs kill -9 2>/dev/null
 done
 ```
+
+### Complete System Restart
+
+If you need to restart everything (AgentBeats + agents):
+
+```bash
+./restart_all.sh
+```
+
+This will restart the entire stack including AgentBeats backend and frontend.
 
 ---
 
@@ -354,10 +440,11 @@ done
 ### Run Test Suite
 
 ```bash
-uv run python test_refactored_tools.py
+uv run python test_mcp_tools.py
 ```
 
 **Expected Output**:
+
 ```
 ✓ PASS     Tool Registration
 ✓ PASS     List Tau-Bench Tools
@@ -368,6 +455,14 @@ uv run python test_refactored_tools.py
 Results: 5/5 tests passed
 🎉 All tests passed!
 ```
+
+### Check System Status
+
+```bash
+./scripts/check_status.sh
+```
+
+This will verify that all launchers and agents are running properly.
 
 ### View Logs
 
@@ -389,21 +484,30 @@ tail -f white_agent.log
 ```
 tau-bench-agents/
 ├── implementations/
-│   └── mcp/
-│       ├── shared_config.py              # LLM provider configuration
+│   ├── mcp/                              # MCP implementation (main)
+│   │   ├── shared_config.py              # LLM provider configuration
+│   │   ├── green_agent/
+│   │   │   ├── agent.py                  # Green agent server
+│   │   │   ├── tools.py                  # Evaluation tools
+│   │   │   └── tau_green_agent_mcp.toml  # Pass@k configuration
+│   │   └── white_agent/
+│   │       ├── agent.py                  # White agent server
+│   │       └── tau_white_agent.toml      # White agent config
+│   └── a2a/                              # A2A implementation (alternative)
 │       ├── green_agent/
-│       │   ├── agent.py                  # Green agent server
-│       │   ├── tools.py                  # Evaluation tools (cleaned up)
-│       │   └── tau_green_agent_mcp.toml  # Pass@k configuration
 │       └── white_agent/
-│           ├── agent.py                  # White agent server
-│           └── tau_white_agent.toml      # White agent config
 ├── launchers/
 │   ├── green_launcher_mcp.py             # Green launcher (port 9111)
 │   └── white_launcher.py                 # White launcher (port 9210)
 ├── scripts/
-│   └── start_mcp.sh                      # Start all services
-└── README_MCP.md                         # This file
+│   ├── start_mcp.sh                      # Start MCP agents
+│   ├── start_a2a.sh                      # Start A2A agents
+│   ├── check_status.sh                   # Verify system status
+│   └── use_openrouter.sh                 # Switch to OpenRouter
+├── main.py                               # CLI entry point
+├── test_mcp_tools.py                     # Test suite
+├── restart_all.sh                        # Complete system restart
+└── README.md                             # This file
 ```
 
 ---
@@ -413,6 +517,7 @@ tau-bench-agents/
 ### Code Cleanup (Latest)
 
 **What Changed**:
+
 - ✅ Removed excessive debug logging
 - ✅ Simplified error messages
 - ✅ Fixed all Python linting warnings
@@ -420,6 +525,7 @@ tau-bench-agents/
 - ✅ Reduced verbosity while maintaining critical logs
 
 **Performance Improvements**:
+
 - httpx keepalive fully disabled (was partially disabled)
 - Longer delay between attempts (2s, was 0.5s)
 - Agent card cache cleared between attempts
@@ -428,11 +534,13 @@ tau-bench-agents/
 ### Bug Fixes
 
 **Import Deadlock Fix**:
+
 - Moved all imports to function top
 - Prevents Python's import lock from blocking async operations
 - Fixes non-deterministic hangs
 
 **Connection Stability**:
+
 - Fresh httpx client for every message
 - No connection reuse (keepalive=0)
 - Explicit client closure in finally blocks
@@ -442,18 +550,24 @@ tau-bench-agents/
 ## Quick Reference
 
 ### Start Commands
-```bash
-# Start everything
-./scripts/start_mcp.sh
-# Check status
-./check_status.sh
 
-# ór
-curl http://localhost:9111/health
-curl http://localhost:9210/health
+```bash
+# Start MCP agents
+./scripts/start_mcp.sh
+
+# Start A2A agents (alternative)
+./scripts/start_a2a.sh
+
+# Check status
+./scripts/check_status.sh
+
+# Verify launchers
+curl http://localhost:9111/health  # MCP green
+curl http://localhost:9210/health  # White
 ```
 
 ### Configuration Files
+
 ```bash
 # Provider configuration
 implementations/mcp/shared_config.py
@@ -463,6 +577,7 @@ implementations/mcp/green_agent/tau_green_agent_mcp.toml
 ```
 
 ### Log Files
+
 ```bash
 # Green agent
 implementations/mcp/green_agent.log
@@ -472,6 +587,7 @@ white_agent.log
 ```
 
 ### Recommended Settings
+
 ```toml
 [pass_k_config]
 mode = "manual"
@@ -480,8 +596,17 @@ domain = "retail"
 task_id = 1
 ```
 
+### Agent URLs for AgentBeats
+
+| Component                    | Port | URL                   |
+| ---------------------------- | ---- | --------------------- |
+| **MCP Green Agent**    | 9006 | http://localhost:9006 |
+| **MCP Green Launcher** | 9111 | http://localhost:9111 |
+| **White Agent**        | 9004 | http://localhost:9004 |
+| **White Launcher**     | 9210 | http://localhost:9210 |
+
 ---
 
-**Ready to start?** Run `./scripts/start_mcp.sh` and create a battle in AgentBeats! 🚀
+**Ready to start?** Run `./scripts/start_mcp.sh` and create a battle in AgentBeats! 
 
 For issues or questions, check the logs or refer to the troubleshooting section above.

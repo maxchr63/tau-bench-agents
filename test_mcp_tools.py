@@ -102,8 +102,12 @@ async def test_setup_environment():
             if len(tools_list) > 5:
                 print(f"  ... and {len(tools_list) - 5} more")
             print()
+            print("✓ setup_tau_bench_environment() works")
+        else:
+            print("✗ setup_tau_bench_environment() FAILED")
+            if 'error' in result:
+                print(f"   Error: {result['error']}")
 
-        print("✓ setup_tau_bench_environment() works")
         return result.get('success', False)
     except Exception as e:
         print(f"✗ Error: {e}")

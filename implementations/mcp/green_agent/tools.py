@@ -362,8 +362,8 @@ async def report_battle_result(
 async def setup_tau_bench_environment(
     env_name: str = "retail",
     user_strategy: str = "llm",
-    user_model: str = "gpt-4o-mini",
-    user_provider: str = "openai",
+    user_model: str | None = None,
+    user_provider: str | None = None,
     task_split: str = "test",
     task_id: int = 5
 ) -> Dict[str, Any]:
@@ -373,8 +373,8 @@ async def setup_tau_bench_environment(
     Args:
         env_name: Environment name (e.g., "retail", "airline")
         user_strategy: User simulation strategy
-        user_model: Model to use for user simulation
-        user_provider: Provider for user model
+        user_model: Model to use for user simulation (defaults to TAU_USER_MODEL from config)
+        user_provider: Provider for user model (defaults to TAU_USER_PROVIDER from config)
         task_split: Task split to use
         task_id: Specific task ID to evaluate
 
@@ -384,12 +384,18 @@ async def setup_tau_bench_environment(
     try:
         logger.info(f"Setting up tau-bench environment: {env_name}, task {task_id}")
 
+        # Use configured values if not explicitly provided
+        if user_model is None:
+            user_model = TAU_USER_MODEL
+        if user_provider is None:
+            user_provider = TAU_USER_PROVIDER
+
         env = get_env(
             env_name=env_name,
             user_strategy=user_strategy,
             user_model=user_model,
             task_split=task_split,
-            user_provider=TAU_USER_PROVIDER,
+            user_provider=user_provider,
             task_index=task_id,
         )
 
@@ -514,8 +520,8 @@ async def evaluate_white_agent(
         env_config = {
             "env": "retail",
             "user_strategy": "llm",
-            "user_model": "gpt-4o-mini",
-            "user_provider": "openai",
+            "user_model": TAU_USER_MODEL,
+            "user_provider": TAU_USER_PROVIDER,
             "task_split": "test",
             "task_ids": [task_id],
         }
@@ -525,7 +531,7 @@ async def evaluate_white_agent(
         user_strategy=env_config["user_strategy"],
         user_model=env_config["user_model"],
         task_split=env_config["task_split"],
-        user_provider=TAU_USER_PROVIDER,
+        user_provider=env_config.get("user_provider", TAU_USER_PROVIDER),
         task_index=task_id,
     )
 
