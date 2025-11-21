@@ -271,6 +271,7 @@ k = 2                     # Number of attempts (use 2 for stability)
 domain = "retail"         # "retail" or "airline"
 task_id = 1              # Task ID to evaluate
 num_battles = 5          # Number of battles to run
+reset_between_attempts = false
 ```
 
 **Important**: For stable evaluation, use `k=2`. Higher values (k=3, k=4) may experience reliability issues due to resource exhaustion.
