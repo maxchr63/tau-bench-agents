@@ -13,7 +13,7 @@ app = FastAPI(title="Green Agent Launcher (MCP)")
 agent_process: Optional[subprocess.Popen] = None
 agent_config = {
     "name": "tau_green_agent_mcp",
-    "host": "localhost",
+    "host": "0.0.0.0",
     "port": 9006,
 }
 

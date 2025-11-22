@@ -19,7 +19,7 @@ agent_process: Optional[subprocess.Popen] = None
 # }
 agent_config = {
     "name": "general_white_agent",
-    "host": "localhost",
+    "host": "0.0.0.0",
     "port": 9004,  # Changed to avoid conflict with AgentBeats ports
 }
 
@@ -93,12 +93,15 @@ async def launch():
     
     # IMPORTANT: Do NOT PIPE stdout/stderr without draining them. It can deadlock when buffers fill.
     # Let the child inherit the parent's stdio or redirect to files.
+    env = {**os.environ}
+    env["HOST"] = agent_config["host"]
+    
     agent_process = subprocess.Popen(
         cmd,
         cwd=project_root,
         stdout=None,
         stderr=None,
-        env={**os.environ}
+        env=env
     )
     
     import asyncio
@@ -155,12 +158,15 @@ async def reset(request: dict):
     cmd = ["uv", "run", "python", "main.py", "white"]
     
     # IMPORTANT: Do NOT PIPE stdout/stderr without draining them. It can deadlock when buffers fill.
+    env = {**os.environ}
+    env["HOST"] = agent_config["host"]
+
     agent_process = subprocess.Popen(
         cmd,
         cwd=project_root,
         stdout=None,
         stderr=None,
-        env={**os.environ}
+        env=env
     )
     
     import asyncio
