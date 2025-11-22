@@ -30,10 +30,19 @@ async def health():
 async def launch():
     global agent_process
     
+    # Determine the agent URL to report back
+    # 1. Use AGENT_PUBLIC_URL env var if set (e.g. https://green.example.com)
+    # 2. Fallback to AGENT_URL env var
+    # 3. Fallback to constructed local URL (http://0.0.0.0:9006)
+    public_url = os.environ.get("AGENT_PUBLIC_URL") or os.environ.get("AGENT_URL")
+    if not public_url:
+        host_for_url = "localhost" if agent_config['host'] == "0.0.0.0" else agent_config['host']
+        public_url = f"http://{host_for_url}:{agent_config['port']}"
+
     if agent_process and agent_process.poll() is None:
         return LaunchResponse(
             status="already_running",
-            agent_url=f"http://{agent_config['host']}:{agent_config['port']}",
+            agent_url=public_url,
             agent_name=agent_config['name']
         )
     
@@ -65,7 +74,7 @@ start_green_agent('{agent_config['name']}', '{agent_config['host']}', {agent_con
     
     return LaunchResponse(
         status="launched",
-        agent_url=f"http://{agent_config['host']}:{agent_config['port']}",
+        agent_url=public_url,
         agent_name=agent_config['name']
     )
 
@@ -143,10 +152,15 @@ start_green_agent('{agent_config['name']}', '{agent_config['host']}', {agent_con
 
 @app.get("/status")
 async def status():
+    public_url = os.environ.get("AGENT_PUBLIC_URL") or os.environ.get("AGENT_URL")
+    if not public_url:
+        host_for_url = "localhost" if agent_config['host'] == "0.0.0.0" else agent_config['host']
+        public_url = f"http://{host_for_url}:{agent_config['port']}"
+
     if agent_process and agent_process.poll() is None:
         return {
             "status": "server up, with agent running",
-            "agent_url": f"http://{agent_config['host']}:{agent_config['port']}",
+            "agent_url": public_url,
             "pid": agent_process.pid,
             "version": "mcp"
         }
