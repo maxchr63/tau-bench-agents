@@ -226,7 +226,14 @@ def start_white_agent(agent_name="general_white_agent", host="localhost", port=9
     if kwargs:
         print(f"White agent received additional kwargs: {kwargs}")
 
-    url = f"http://{host}:{port}"
+    # Determine the public URL for the agent card
+    # Priority: AGENT_URL env var > construct from host/port (using localhost for 0.0.0.0)
+    url = os.environ.get("AGENT_URL")
+    if not url:
+        # Use localhost for the URL even when binding to 0.0.0.0
+        url_host = "localhost" if host in ("0.0.0.0", "127.0.0.1") else host
+        url = f"http://{url_host}:{port}"
+    print(f"White agent URL: {url}")
     card = prepare_white_agent_card(url)
 
     request_handler = DefaultRequestHandler(

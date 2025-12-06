@@ -278,13 +278,22 @@ def start_green_agent(agent_name="tau_green_agent_mcp", host="localhost", port=9
 
     VERSION using AgentBeats SDK patterns.
     """
+    import os
     print("Starting green agent (mcp ready version)...")
     if kwargs:
         print(f"Green agent received additional kwargs: {kwargs}")
     
     agent_card_dict = load_agent_card_toml(agent_name)
-    url = f"http://{host}:{port}"
+    
+    # Determine the public URL for the agent card
+    # Priority: AGENT_URL env var > construct from host/port (using localhost for 0.0.0.0)
+    url = os.environ.get("AGENT_URL")
+    if not url:
+        # Use localhost for the URL even when binding to 0.0.0.0
+        url_host = "localhost" if host in ("0.0.0.0", "127.0.0.1") else host
+        url = f"http://{url_host}:{port}"
     agent_card_dict["url"] = url
+    print(f"Green agent URL: {url}")
 
     request_handler = DefaultRequestHandler(
         agent_executor=TauGreenAgentExecutor(),
