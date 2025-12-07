@@ -2,13 +2,19 @@
 
 import os
 import typer
-from pydantic_settings import BaseSettings
+from pydantic_settings import BaseSettings, SettingsConfigDict
+
+# Load .env file FIRST before any other imports
+import dotenv
+dotenv.load_dotenv()
 
 from implementations.mcp.green_agent.agent import start_green_agent
 from implementations.mcp.white_agent.agent import start_white_agent
 
 
 class TaubenchSettings(BaseSettings):
+    model_config = SettingsConfigDict(env_file=".env", extra="ignore")
+    
     role: str = "unspecified"
     host: str = "127.0.0.1"
     agent_port: int = 9000
@@ -34,9 +40,13 @@ def green():
 def white():
     """Start the white agent (target being tested)."""
     settings = TaubenchSettings()
+    print(f"[DEBUG] WHITE_AGENT_URL from env: {os.environ.get('WHITE_AGENT_URL', 'NOT SET')}")
+    print(f"[DEBUG] settings.white_agent_url: {settings.white_agent_url or 'EMPTY'}")
     if settings.white_agent_url:
         os.environ["AGENT_URL"] = settings.white_agent_url
         print(f"Setting AGENT_URL={settings.white_agent_url} for white agent")
+    else:
+        print("[WARNING] white_agent_url is empty - agent card will use localhost")
     start_white_agent()
 
 
