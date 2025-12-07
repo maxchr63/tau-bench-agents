@@ -23,12 +23,20 @@ app = typer.Typer(help="Agentified Tau-Bench - Standardized agent assessment fra
 @app.command()
 def green():
     """Start the green agent (assessment manager)."""
+    settings = TaubenchSettings()
+    if settings.green_agent_url:
+        os.environ["AGENT_URL"] = settings.green_agent_url
+        print(f"Setting AGENT_URL={settings.green_agent_url} for green agent")
     start_green_agent()
 
 
 @app.command()
 def white():
     """Start the white agent (target being tested)."""
+    settings = TaubenchSettings()
+    if settings.white_agent_url:
+        os.environ["AGENT_URL"] = settings.white_agent_url
+        print(f"Setting AGENT_URL={settings.white_agent_url} for white agent")
     start_white_agent()
 
 
