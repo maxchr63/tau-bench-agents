@@ -8,6 +8,9 @@ This module exposes tau-bench evaluation tools.
 import json
 import logging
 import sys
+import asyncio
+import signal
+from concurrent.futures import ProcessPoolExecutor, ThreadPoolExecutor
 from typing import Dict, Any, Optional, TYPE_CHECKING
 
 # ============================================================================
@@ -32,12 +35,91 @@ if TYPE_CHECKING:
 logger = logging.getLogger("green_agent.tools")
 
 # ============================================================================
+# TIMEOUT CONFIGURATION
+# ============================================================================
+ENV_STEP_TIMEOUT = 60.0  # Timeout for env.step() calls
+ENV_RESET_TIMEOUT = 30.0  # Timeout for env.reset() calls
+MAX_CONCURRENT_REQUESTS = 3  # Circuit breaker: max concurrent LLM requests
+
+# Global request counter for circuit breaker
+_active_requests = 0
+_request_lock = asyncio.Lock() if hasattr(asyncio, 'Lock') else None
+
+# ============================================================================
 # HTTP CLIENT CONFIGURATION
 # ============================================================================
 
 # Cache agent card to avoid repeated fetches
 _cached_agent_card: Optional[AgentCard] = None
 _card_cache_url: Optional[str] = None
+
+
+# ============================================================================
+# CIRCUIT BREAKER - Prevent runaway requests
+# ============================================================================
+class CircuitBreaker:
+    """Simple circuit breaker to prevent too many concurrent LLM requests."""
+    
+    def __init__(self, max_concurrent: int = MAX_CONCURRENT_REQUESTS):
+        self.max_concurrent = max_concurrent
+        self._active = 0
+        self._lock = None  # Lazy init for async lock
+    
+    async def _get_lock(self):
+        if self._lock is None:
+            self._lock = asyncio.Lock()
+        return self._lock
+    
+    async def acquire(self) -> bool:
+        """Try to acquire a slot. Returns False if circuit is open (too many requests)."""
+        lock = await self._get_lock()
+        async with lock:
+            if self._active >= self.max_concurrent:
+                logger.warning(f"[CIRCUIT BREAKER] Rejecting request: {self._active}/{self.max_concurrent} active")
+                return False
+            self._active += 1
+            logger.debug(f"[CIRCUIT BREAKER] Acquired slot: {self._active}/{self.max_concurrent} active")
+            return True
+    
+    async def release(self):
+        """Release a slot."""
+        lock = await self._get_lock()
+        async with lock:
+            self._active = max(0, self._active - 1)
+            logger.debug(f"[CIRCUIT BREAKER] Released slot: {self._active}/{self.max_concurrent} active")
+
+# Global circuit breaker instance
+_circuit_breaker = CircuitBreaker()
+
+
+async def run_with_timeout(func, *args, timeout: float, fallback=None, **kwargs):
+    """
+    Run a synchronous function with a proper timeout that actually terminates.
+    
+    Uses a thread pool but ensures we don't wait forever if the thread hangs.
+    The thread may continue running, but we won't block on it.
+    """
+    loop = asyncio.get_event_loop()
+    
+    # Use a fresh executor each time to avoid thread reuse issues
+    executor = ThreadPoolExecutor(max_workers=1, thread_name_prefix="tau_timeout_")
+    
+    try:
+        future = loop.run_in_executor(executor, lambda: func(*args, **kwargs))
+        result = await asyncio.wait_for(future, timeout=timeout)
+        return result
+    except asyncio.TimeoutError:
+        logger.error(f"[TIMEOUT] Function {func.__name__} timed out after {timeout}s")
+        # Note: The thread may still be running, but we stop waiting
+        # The executor will be garbage collected eventually
+        raise
+    except Exception as e:
+        logger.error(f"[TIMEOUT] Function {func.__name__} raised: {type(e).__name__}: {e}")
+        raise
+    finally:
+        # Shutdown executor without waiting - let threads die naturally
+        executor.shutdown(wait=False)
+
 
 def _get_httpx_client(timeout: float = 120.0) -> "httpx.AsyncClient":
     """
@@ -818,10 +900,52 @@ async def evaluate_agent_with_pass_k(
 
         timestamp_started = time.time()
 
-        # Reset environment for fresh attempt
+        # Reset environment for fresh attempt - WITH TIMEOUT
         logger.info(f"[DEBUG] Calling env.reset() for attempt {attempt_num + 1}")
-        env_reset_res = env.reset(task_index=task_id)
-        logger.info(f"[DEBUG] env.reset() completed for attempt {attempt_num + 1}")
+        try:
+            env_reset_res = await run_with_timeout(
+                env.reset,
+                task_index=task_id,
+                timeout=ENV_RESET_TIMEOUT
+            )
+            logger.info(f"[DEBUG] env.reset() completed for attempt {attempt_num + 1}")
+        except asyncio.TimeoutError:
+            logger.error(f"[TIMEOUT] env.reset() timed out after {ENV_RESET_TIMEOUT}s for attempt {attempt_num + 1}")
+            attempts.append({
+                "attempt": attempt_num + 1,
+                "success": False,
+                "reward": 0.0,
+                "steps": 0,
+                "time": time.time() - timestamp_started,
+                "error": f"Environment reset timed out after {ENV_RESET_TIMEOUT}s",
+                "failure_detail": {"category": "timeout", "description": "env.reset() timed out"},
+                "tau_bench_info": {}
+            })
+            failure_reasons.append("timeout")
+            if event_queue:
+                await event_queue.enqueue_event(
+                    new_agent_text_message(f"❌ Attempt {attempt_num + 1}/{k}: TIMEOUT during environment reset")
+                )
+            continue  # Skip to next attempt
+        except Exception as e:
+            logger.error(f"[ERROR] env.reset() failed for attempt {attempt_num + 1}: {e}")
+            attempts.append({
+                "attempt": attempt_num + 1,
+                "success": False,
+                "reward": 0.0,
+                "steps": 0,
+                "time": time.time() - timestamp_started,
+                "error": f"Environment reset failed: {str(e)}",
+                "failure_detail": {"category": "environment_error", "description": str(e)},
+                "tau_bench_info": {}
+            })
+            failure_reasons.append("environment_error")
+            if event_queue:
+                await event_queue.enqueue_event(
+                    new_agent_text_message(f"❌ Attempt {attempt_num + 1}/{k}: Environment reset failed")
+                )
+            continue  # Skip to next attempt
+
         obs = env_reset_res.observation
         info = env_reset_res.info.model_dump()
         reward = 0.0
@@ -905,17 +1029,29 @@ User message: {obs}
                     logger.error(attempt_error)
                     break
 
-                # Execute action in tau-bench environment with a safety timeout
+                # Execute action in tau-bench environment with circuit breaker and timeout
+                # Check circuit breaker first
+                if not await _circuit_breaker.acquire():
+                    attempt_error = "Circuit breaker open: too many concurrent requests"
+                    logger.error(attempt_error)
+                    break
+                
                 try:
-                    ENV_STEP_TIMEOUT = 60.0
-                    env_response = await asyncio.wait_for(
-                        asyncio.to_thread(env.step, action),
+                    env_response = await run_with_timeout(
+                        env.step,
+                        action,
                         timeout=ENV_STEP_TIMEOUT
                     )
                 except asyncio.TimeoutError:
                     attempt_error = f"Environment step timed out after {ENV_STEP_TIMEOUT}s for action '{action.name}'"
                     logger.error(attempt_error)
                     break
+                except Exception as step_err:
+                    attempt_error = f"Environment step failed: {type(step_err).__name__}: {step_err}"
+                    logger.error(attempt_error)
+                    break
+                finally:
+                    await _circuit_breaker.release()
 
                 reward = env_response.reward
                 info = {**info, **env_response.info.model_dump()}
