@@ -13,19 +13,15 @@ USE_PROVIDER = os.environ.get("USE_PROVIDER", "openrouter")  # Options: "openai"
 # ============================================================================
 
 # ============================================================================
-# GLOBAL TIMEOUT CONFIGURATION - Prevent hanging LLM calls
+# CRITICAL: Global timeout to prevent hanging LLM calls that cause 100% CPU
 # ============================================================================
-# Set global request timeout for ALL LiteLLM calls (in seconds)
-# This prevents zombie threads from LLM calls that never return
-LLM_REQUEST_TIMEOUT = int(os.environ.get("LLM_REQUEST_TIMEOUT", "60"))
-litellm.request_timeout = LLM_REQUEST_TIMEOUT
-
-# Also set num_retries to limit retry storms
-litellm.num_retries = 2
+litellm.request_timeout = 60  # 60 second timeout for all LLM requests
+litellm.num_retries = 1       # Only 1 retry to prevent retry storms
+# ============================================================================
 
 print(f"\n{'='*70}")
 print(f"🔧 CONFIGURING LiteLLM - Provider: {USE_PROVIDER}")
-print(f"   Request Timeout: {LLM_REQUEST_TIMEOUT}s, Max Retries: {litellm.num_retries}")
+print(f"   Timeout: {litellm.request_timeout}s, Retries: {litellm.num_retries}")
 print(f"{'='*70}\n")
 
 if USE_PROVIDER == "openrouter":

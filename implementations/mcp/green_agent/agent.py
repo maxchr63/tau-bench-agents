@@ -1,21 +1,21 @@
 """Green agent implementation - manages assessment and evaluation."""
 
-# CRITICAL: Import shared config FIRST to configure LiteLLM before anything else!
+# Fast imports first - get the server up quickly
 import sys
+import os
 from pathlib import Path
-_project_root = str(Path(__file__).parent.parent.parent)
-if _project_root not in sys.path:
-    sys.path.insert(0, _project_root)
-from implementations.mcp.shared_config import USE_PROVIDER, TAU_USER_MODEL, TAU_USER_PROVIDER
-print(f"[GREEN AGENT STARTUP] Loaded config: Provider={USE_PROVIDER}, Model={TAU_USER_MODEL}")
-
 import uvicorn
 import tomllib
-import dotenv
 import json
 import logging
 import time
 
+# Setup path before any local imports
+_project_root = str(Path(__file__).parent.parent.parent)
+if _project_root not in sys.path:
+    sys.path.insert(0, _project_root)
+
+# Fast A2A imports (these are lightweight)
 from a2a.server.apps import A2AStarletteApplication
 from a2a.server.request_handlers import DefaultRequestHandler
 from a2a.server.agent_execution import AgentExecutor, RequestContext
@@ -24,10 +24,29 @@ from a2a.server.tasks import InMemoryTaskStore
 from a2a.types import AgentCard
 from a2a.utils import new_agent_text_message
 
-# Import our new tools (local to this implementation)
-from . import tools as green_tools
+# LAZY IMPORTS: Heavy modules (litellm, tau-bench) are imported only when needed
+# This allows the A2A server to start immediately and respond to health checks
+green_tools = None  # Lazy loaded on first request
+_config_loaded = False
+USE_PROVIDER = os.environ.get("USE_PROVIDER", "openrouter")
+TAU_USER_MODEL = os.environ.get("TAU_USER_MODEL", "openrouter/anthropic/claude-haiku-4.5")
+TAU_USER_PROVIDER = os.environ.get("TAU_USER_PROVIDER", "openrouter")
 
-dotenv.load_dotenv()
+def _lazy_load_tools():
+    """Lazy load heavy dependencies on first use."""
+    global green_tools, _config_loaded, USE_PROVIDER, TAU_USER_MODEL, TAU_USER_PROVIDER
+    if green_tools is None:
+        print("[GREEN AGENT] Lazy loading tools and config (first request)...")
+        import dotenv
+        dotenv.load_dotenv()
+        # Now load the heavy modules
+        from implementations.mcp.shared_config import USE_PROVIDER as _UP, TAU_USER_MODEL as _TM, TAU_USER_PROVIDER as _TP
+        USE_PROVIDER, TAU_USER_MODEL, TAU_USER_PROVIDER = _UP, _TM, _TP
+        from . import tools as _tools
+        green_tools = _tools
+        _config_loaded = True
+        print(f"[GREEN AGENT] Tools loaded. Provider={USE_PROVIDER}, Model={TAU_USER_MODEL}")
+    return green_tools
 
 # Configuration
 TAU_TASK_ID = 5  # Change this to test different tasks
@@ -82,6 +101,10 @@ class TauGreenAgentExecutor(AgentExecutor):
 
     async def execute(self, context: RequestContext, event_queue: EventQueue) -> None:
         logger.info("=== Green agent received task ===")
+        
+        # Lazy load heavy dependencies on first request
+        tools = _lazy_load_tools()
+        
         user_input = context.get_user_input()
         logger.info(f"Received user_input: {user_input[:500]}")
 
@@ -92,8 +115,8 @@ class TauGreenAgentExecutor(AgentExecutor):
         
         try:
             # Try parsing XML tags (agentify-example style)
-            white_agent_url = green_tools.parse_xml_tags(user_input, "white_agent_url")
-            env_config_str = green_tools.parse_xml_tags(user_input, "env_config")
+            white_agent_url = tools.parse_xml_tags(user_input, "white_agent_url")
+            env_config_str = tools.parse_xml_tags(user_input, "env_config")
             
             if white_agent_url and env_config_str:
                 logger.info("Parsed input using XML tags")
@@ -113,8 +136,8 @@ class TauGreenAgentExecutor(AgentExecutor):
                     env_config = {
                         "env": "retail",
                         "user_strategy": "llm",
-                        "user_model": green_tools.TAU_USER_MODEL,
-                        "user_provider": green_tools.TAU_USER_PROVIDER,
+                        "user_model": tools.TAU_USER_MODEL,
+                        "user_provider": tools.TAU_USER_PROVIDER,
                         "task_split": "test",
                         "task_ids": [TAU_TASK_ID],
                     }
@@ -203,7 +226,7 @@ class TauGreenAgentExecutor(AgentExecutor):
             reset_between_attempts = bool(self.pass_k_config.get("reset_between_attempts", False))
             
             # Pass event_queue directly for real-time updates
-            results = await green_tools.evaluate_agent_with_pass_k(
+            results = await tools.evaluate_agent_with_pass_k(
                 white_agent_url=white_agent_url,
                 domain=domain,
                 task_id=task_id,

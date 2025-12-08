@@ -10,8 +10,6 @@ from implementations.mcp.shared_config import TAU_USER_MODEL, TAU_USER_PROVIDER
 
 import logging
 import os
-import asyncio
-from concurrent.futures import ThreadPoolExecutor
 import uvicorn
 import dotenv
 from a2a.server.apps import A2AStarletteApplication
@@ -22,9 +20,6 @@ from a2a.server.tasks import InMemoryTaskStore
 from a2a.types import AgentSkill, AgentCard, AgentCapabilities
 from a2a.utils import new_agent_text_message
 from litellm import completion
-
-# LLM timeout configuration
-LLM_TIMEOUT = 60.0  # seconds
 
 # Set up logging
 logger = logging.getLogger("white_agent")
@@ -129,47 +124,26 @@ class GeneralWhiteAgentExecutor(AgentExecutor):
         print(f"[White Agent] Using temperature: {temperature}")
         
         # Add timeout protection to prevent hanging on LLM calls
-        # Use a fresh ThreadPoolExecutor each time to avoid zombie thread buildup
+        import asyncio
         try:
             logger.info(f"[API] >>> Sending LLM request: model={TAU_USER_MODEL}, messages={len(messages)}, temp={temperature}")
             print(f"[White Agent API] >>> Sending LLM request: model={TAU_USER_MODEL}, messages={len(messages)}, temp={temperature}", file=sys.stderr, flush=True)
-            
-            # Create a fresh executor for this request
-            executor = ThreadPoolExecutor(max_workers=1, thread_name_prefix="white_llm_")
-            loop = asyncio.get_event_loop()
-            
-            try:
-                future = loop.run_in_executor(
-                    executor,
-                    lambda: completion(
-                        model=TAU_USER_MODEL,
-                        messages=messages,
-                        temperature=temperature,
-                    )
-                )
-                response = await asyncio.wait_for(future, timeout=LLM_TIMEOUT)
-            finally:
-                # Shutdown executor without waiting - prevents blocking on hung threads
-                executor.shutdown(wait=False)
-            
+            response = await asyncio.wait_for(
+                asyncio.to_thread(
+                    completion,
+                    model=TAU_USER_MODEL,
+                    messages=messages,
+                    temperature=temperature,
+                ),
+                timeout=60.0  # 60 second timeout for LLM completion
+            )
             logger.info(f"[API] <<< Received LLM response: {len(response.choices[0].message.content or '')} chars")
             print(f"[White Agent API] <<< Received LLM response: {len(response.choices[0].message.content or '')} chars", file=sys.stderr, flush=True)
         except asyncio.TimeoutError:
-            error_msg = f"LLM completion timed out after {LLM_TIMEOUT} seconds"
+            error_msg = "LLM completion timed out after 60 seconds"
             logger.error(f"[API] XXX {error_msg}")
             print(f"[White Agent ERROR] {error_msg}")
             # Return error response in expected format
-            await event_queue.enqueue_event(
-                new_agent_text_message(
-                    '<json>{"name": "transfer_to_human_agents", "kwargs": {"content": "I apologize, but I\'m experiencing technical difficulties. Please contact human support."}}</json>',
-                    context_id=context.context_id
-                )
-            )
-            return
-        except Exception as llm_error:
-            error_msg = f"LLM completion failed: {type(llm_error).__name__}: {llm_error}"
-            logger.error(f"[API] XXX {error_msg}")
-            print(f"[White Agent ERROR] {error_msg}")
             await event_queue.enqueue_event(
                 new_agent_text_message(
                     '<json>{"name": "transfer_to_human_agents", "kwargs": {"content": "I apologize, but I\'m experiencing technical difficulties. Please contact human support."}}</json>',
