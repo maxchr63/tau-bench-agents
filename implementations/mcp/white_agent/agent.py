@@ -9,6 +9,7 @@ if _project_root not in sys.path:
 from implementations.mcp.shared_config import TAU_USER_MODEL, TAU_USER_PROVIDER
 
 import logging
+import os
 import uvicorn
 import dotenv
 from a2a.server.apps import A2AStarletteApplication
@@ -178,8 +179,9 @@ class GeneralWhiteAgentExecutor(AgentExecutor):
                         context_id=context.context_id
                     )
                 )
-            finally:
-                return
+            except Exception:
+                pass  # Silently fail the fallback attempt
+            return
 
     async def cancel(self, context, event_queue) -> None:
         raise NotImplementedError

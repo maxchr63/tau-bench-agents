@@ -49,7 +49,6 @@ def white():
         print("[WARNING] white_agent_url is empty - agent card will use localhost")
     start_white_agent()
 
-
 @app.command()
 def run():
     """Run the agent based on environment variables."""
