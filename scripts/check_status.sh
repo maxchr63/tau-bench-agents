@@ -66,7 +66,9 @@ fi
 echo ""
 echo "Checking if agents are running..."
 GREEN_AGENT=$(lsof -i :9006 -t 2>/dev/null)
-WHITE_AGENT=$(lsof -i :9004 -t 2>/dev/null)
+WHITE_BASELINE=$(lsof -i :9004 -t 2>/dev/null)
+WHITE_STATELESS=$(lsof -i :9014 -t 2>/dev/null)
+WHITE_REASONING=$(lsof -i :9024 -t 2>/dev/null)
 
 if [ -z "$GREEN_AGENT" ]; then
     echo "ℹ️  Green agent is NOT running on port 9006 (launch it first)"
@@ -74,10 +76,28 @@ else
     echo "✅ Green agent is running (PID: $GREEN_AGENT)"
 fi
 
-if [ -z "$WHITE_AGENT" ]; then
-    echo "ℹ️  White agent is NOT running on port 9004 (launch it first)"
-else
-    echo "✅ White agent is running (PID: $WHITE_AGENT)"
+# Check all white agent variants
+WHITE_FOUND=false
+if [ -n "$WHITE_BASELINE" ]; then
+    echo "✅ White agent BASELINE variant is running (PID: $WHITE_BASELINE, Port: 9004)"
+    WHITE_FOUND=true
+fi
+
+if [ -n "$WHITE_STATELESS" ]; then
+    echo "✅ White agent STATELESS variant is running (PID: $WHITE_STATELESS, Port: 9014)"
+    WHITE_FOUND=true
+fi
+
+if [ -n "$WHITE_REASONING" ]; then
+    echo "✅ White agent REASONING variant is running (PID: $WHITE_REASONING, Port: 9024)"
+    WHITE_FOUND=true
+fi
+
+if [ "$WHITE_FOUND" = false ]; then
+    echo "ℹ️  No white agent variants are running"
+    echo "   Launch with: ./scripts/start_mcp.sh"
+    echo "   Or: AGENT_VARIANT=stateless ./scripts/start_mcp.sh"
+    echo "   Or: AGENT_VARIANT=reasoning ./scripts/start_mcp.sh"
 fi
 
 echo ""
@@ -88,8 +108,15 @@ if [ -z "$GREEN_RUNNING" ] || [ -z "$WHITE_RUNNING" ]; then
     echo "2. Run this script again to verify"
 else
     echo "1. Register agents in AgentBeats UI:"
-    echo "   - White: http://localhost:9004 (Launcher: http://localhost:9210)"
     echo "   - Green: http://localhost:9006 (Launcher: http://localhost:9111)"
+    echo "   - White (baseline): http://localhost:9004 (Launcher: http://localhost:9210)"
+    echo "   - White (stateless): http://localhost:9014 (Launcher: http://localhost:9210)"
+    echo "   - White (reasoning): http://localhost:9024 (Launcher: http://localhost:9210)"
     echo "2. Launch agents via UI or API"
     echo "3. Create and run your evaluation!"
+    echo ""
+    echo "Available white agent variants:"
+    echo "  • baseline   - Conversation memory (port 9004)"
+    echo "  • stateless  - No memory (port 9014)"
+    echo "  • reasoning  - Memory + reasoning (port 9024)"
 fi

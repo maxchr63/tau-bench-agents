@@ -1,10 +1,7 @@
 [scenario]
-name = "tau-bench-pass-k"
-description = "Tau-bench pass@k evaluation scenario"
+name = "tau-bench-stateless"
+description = "Tau-bench evaluation with STATELESS white agent (no conversation memory)"
 version = "1.0.0"
-
-# No external services needed for tau-bench
-# (tau-bench runs internally in the green agent)
 
 # Agents to be launched
 [[agents]]
@@ -26,24 +23,25 @@ is_green = true
 role = "white_agent"
 name = "white_agent_requirement"
 required = true
-participant_agent = "Tau White Agent (MCP)"
+participant_agent = "Tau White Agent Stateless (MCP)"
 
 [[agents]]
-name = "Tau White Agent (MCP)"
+name = "Tau White Agent Stateless (MCP)"
 card = "white_agent/tau_white_agent.toml"
 launcher_host = "0.0.0.0"
 launcher_port = 9211
 agent_host = "0.0.0.0"
-agent_port = 9004  # Baseline white agent port (was 9210 - launcher port)
+agent_port = 9014  # Different port for stateless variant
 backend = "http://localhost:9000"
 model_type = "openai"
 model_name = "gpt-4o-mini"
 tools = []
 mcp_servers = []
+variant = "stateless"  # Marker for which variant to use
 
 # Launch configuration
 [launch]
 mode = "tmux"  # Options: "tmux", "separate", "current"
-tmux_session_name = "tau-bench-pass-k"
+tmux_session_name = "tau-bench-stateless"
 startup_interval = 2  # seconds between launching each component
 wait_for_services = false  # no external services

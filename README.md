@@ -62,6 +62,14 @@ uv sync
 # Start agents
 ./scripts/start_mcp.sh
 
+# If you want to launch different white agent variants, this can be done by setting the respective environment variables:
+
+# Stateless variant
+AGENT_VARIANT=stateless ./scripts/start_mcp.sh
+
+# Reasoning variant
+AGENT_VARIANT=reasoning ./scripts/start_mcp.sh
+
 # Test tools
 uv run python scripts/test_mcp_tools.py
 ```
@@ -127,6 +135,14 @@ cd /path/to/tau-bench-agents
 
 # Start MCP agents
 ./scripts/start_mcp.sh
+
+# If you want to launch different white agent variants, this can be done by setting the respective environment variables:
+
+# Stateless variant
+AGENT_VARIANT=stateless ./scripts/start_mcp.sh
+
+# Reasoning variant
+AGENT_VARIANT=reasoning ./scripts/start_mcp.sh
 ```
 
 ### Provider Configuration
@@ -140,15 +156,18 @@ USE_PROVIDER = "openrouter"  # Change to "openai" or "openrouter"
 ```
 
 **Provider Options:**
+
 - `"openrouter"` - Use OpenRouter (recommended, no rate limits)
+
   - Requires: `OPENROUTER_API_KEY` in `.env`
   - Model: `anthropic/claude-haiku-4.5`
-  
 - `"openai"` - Use OpenAI directly
+
   - Requires: `OPENAI_API_KEY` in `.env`
   - Model: `gpt-4o-mini`
 
 After changing provider, restart the agents:
+
 ```bash
 ./scripts/start_mcp.sh
 ```
