@@ -78,6 +78,7 @@ uv run python scripts/test_mcp_tools.py
 
 ## Table of Contents
 
+- [White Agent Variants](#white-agent-variants)
 - [Installation](#installation)
 - [Architecture Overview](#architecture-overview)
 - [Configuration](#configuration)
@@ -86,6 +87,74 @@ uv run python scripts/test_mcp_tools.py
 - [Testing on AgentBeats](#testing-on-agentbeats)
 - [Reproducing Tau-Bench Results](#reproducing-tau-bench-results)
 - [Troubleshooting](#troubleshooting)
+
+---
+
+## White Agent Variants
+
+This implementation includes **three white agent variants** for comparative evaluation, demonstrating the impact of conversation memory and explicit reasoning on task performance.
+
+### Available Variants
+
+| Variant | Port | Conversation Memory | Explicit Reasoning | Speed | Expected Performance |
+|---------|------|-------------------|-------------------|--------|---------------------|
+| **Stateless** | 9014 | ❌ None | ❌ No | 🚀 Fast | ⬇️ Worse (no memory hurts multi-turn tasks) |
+| **Baseline** | 9004 | ✅ Yes | ❌ No | ⚡ Medium | ➡️ Reference point |
+| **Reasoning** | 9024 | ✅ Yes | ✅ Yes | 🐌 Slower | ⬆️ Better (explicit reasoning helps) |
+
+### Quick Launch Commands
+
+**Individual agents:**
+```bash
+# Baseline agent (default)
+uv run python main.py white
+
+# Stateless agent (no conversation memory)
+uv run python main.py white-stateless
+
+# Reasoning agent (with explicit reasoning steps)
+uv run python main.py white-reasoning
+```
+
+**With AgentBeats via environment variable:**
+```bash
+# Launch stateless variant
+AGENT_VARIANT=stateless ./scripts/start_mcp.sh
+
+# Launch reasoning variant  
+AGENT_VARIANT=reasoning ./scripts/start_mcp.sh
+
+# Launch baseline (default)
+./scripts/start_mcp.sh
+```
+
+### Variant Details
+
+**Stateless Agent (`agent_stateless.py`):**
+- **NO conversation memory** - treats each request as a fresh conversation
+- Useful for demonstrating the importance of conversation state in multi-turn tasks
+- Expected to perform worse on complex tasks requiring context
+
+**Baseline Agent (`agent.py`):**
+- Maintains conversation memory across turns (stores message history per context)
+- Standard JSON-formatted responses without explicit reasoning
+- Serves as the reference point for comparison
+
+**Reasoning-Enhanced Agent (`agent_reasoning.py`):**
+- Maintains conversation memory (same as baseline)
+- **Explicit reasoning steps** using `<reasoning>` tags before taking actions
+- **Enhanced system prompt** that specifically conditions the agent to:
+  - Think through problems step-by-step before acting
+  - Consider available information, options, and consequences
+  - Focus on completing multi-step tasks fully (don't stop until database state matches expectations)
+  - Improve response formatting (strict `<json>` tag requirements)
+  - Prevent incorrect database states through thorough analysis
+- Considers context, options, and consequences before making decisions
+- Expected to perform better on complex decision-making tasks but slower due to reasoning overhead
+
+### Running Comparative Evaluations
+
+Each variant can be evaluated independently by setting the appropriate configuration and running battles in AgentBeats. The different ports allow you to test multiple variants without conflicts, though it's recommended to run evaluations sequentially to avoid resource contention.
 
 ---
 
