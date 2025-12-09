@@ -16,8 +16,22 @@ def green():
 
 @app.command()
 def white():
-    """Start the white agent (target being tested)."""
+    """Start the white agent (baseline with conversation memory)."""
     start_white_agent()
+
+
+@app.command()
+def white_stateless():
+    """Start the stateless white agent (NO conversation memory - expected to perform worse)."""
+    from implementations.mcp.white_agent.agent_stateless import start_white_agent as start_stateless
+    start_stateless()
+
+
+@app.command()
+def white_reasoning():
+    """Start the reasoning-enhanced white agent (explicit reasoning steps - expected to perform better)."""
+    from implementations.mcp.white_agent.agent_reasoning import start_white_agent as start_reasoning
+    start_reasoning()
 
 
 if __name__ == "__main__":

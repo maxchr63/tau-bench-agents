@@ -12,16 +12,34 @@ from typing import Optional
 app = FastAPI(title="White Agent Launcher")
 
 agent_process: Optional[subprocess.Popen] = None
-# agent_config = {
-#     "name": "general_white_agent",
-#     "host": "localhost",
-#     "port": 9215,  # Agent runs on 9215, launcher on 9210
-# }
-agent_config = {
-    "name": "general_white_agent",
-    "host": "localhost",
-    "port": 9004,  # Changed to avoid conflict with AgentBeats ports
+
+# Support for different agent variants
+# Set via environment variable AGENT_VARIANT: baseline, stateless, or reasoning
+AGENT_VARIANT = os.getenv("AGENT_VARIANT", "baseline")
+
+VARIANT_CONFIG = {
+    "baseline": {
+        "name": "general_white_agent",
+        "host": "localhost",
+        "port": 9004,
+        "command": "white"
+    },
+    "stateless": {
+        "name": "stateless_white_agent",
+        "host": "localhost",
+        "port": 9014,
+        "command": "white-stateless"
+    },
+    "reasoning": {
+        "name": "reasoning_white_agent",
+        "host": "localhost",
+        "port": 9024,
+        "command": "white-reasoning"
+    }
 }
+
+agent_config = VARIANT_CONFIG.get(AGENT_VARIANT, VARIANT_CONFIG["baseline"])
+print(f"[White Launcher] Using variant: {AGENT_VARIANT} on port {agent_config['port']}")
 
 
 class LaunchResponse(BaseModel):
@@ -88,7 +106,7 @@ async def launch():
     
     project_root = Path(__file__).parent.parent
     cmd = [
-        "uv", "run", "python", "main.py", "white"
+        "uv", "run", "python", "main.py", agent_config['command']
     ]
     
     # IMPORTANT: Do NOT PIPE stdout/stderr without draining them. It can deadlock when buffers fill.
@@ -152,7 +170,7 @@ async def reset(request: dict):
     
     # Relaunch the agent
     project_root = Path(__file__).parent.parent
-    cmd = ["uv", "run", "python", "main.py", "white"]
+    cmd = ["uv", "run", "python", "main.py", agent_config['command']]
     
     # IMPORTANT: Do NOT PIPE stdout/stderr without draining them. It can deadlock when buffers fill.
     agent_process = subprocess.Popen(
