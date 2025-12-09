@@ -12,15 +12,29 @@ from implementations.mcp.green_agent.agent import start_green_agent
 from implementations.mcp.white_agent.agent import start_white_agent
 
 
+def get_agent_url() -> str | None:
+    """
+    Get agent URL from CLOUDRUN_HOST.
+    This is the ONLY way to set the public URL for agents.
+    
+    CLOUDRUN_HOST is set by the AgentBeats controller and contains the public hostname.
+    If not set, agents will use localhost (for local development).
+    """
+    cloudrun_host = os.environ.get("CLOUDRUN_HOST")
+    if not cloudrun_host:
+        return None
+    
+    https_enabled = os.environ.get("HTTPS_ENABLED", "true").lower() in ("true", "1", "yes")
+    protocol = "https" if https_enabled else "http"
+    return f"{protocol}://{cloudrun_host}"
+
+
 class TaubenchSettings(BaseSettings):
     model_config = SettingsConfigDict(env_file=".env", extra="ignore")
     
     role: str = "unspecified"
     host: str = "127.0.0.1"
     agent_port: int = 9000
-    # Public URLs for the agents (used in agent cards)
-    green_agent_url: str = ""
-    white_agent_url: str = ""
 
 
 app = typer.Typer(help="Agentified Tau-Bench - Standardized agent assessment framework")
@@ -29,42 +43,34 @@ app = typer.Typer(help="Agentified Tau-Bench - Standardized agent assessment fra
 @app.command()
 def green():
     """Start the green agent (assessment manager)."""
-    settings = TaubenchSettings()
-    if settings.green_agent_url:
-        os.environ["AGENT_URL"] = settings.green_agent_url
-        print(f"Setting AGENT_URL={settings.green_agent_url} for green agent")
-    start_green_agent()
+    agent_url = get_agent_url()
+    if agent_url:
+        print(f"[URL] {agent_url}")
+    start_green_agent(public_url=agent_url)
 
 
 @app.command()
 def white():
     """Start the white agent (target being tested)."""
-    settings = TaubenchSettings()
-    print(f"[DEBUG] WHITE_AGENT_URL from env: {os.environ.get('WHITE_AGENT_URL', 'NOT SET')}")
-    print(f"[DEBUG] settings.white_agent_url: {settings.white_agent_url or 'EMPTY'}")
-    if settings.white_agent_url:
-        os.environ["AGENT_URL"] = settings.white_agent_url
-        print(f"Setting AGENT_URL={settings.white_agent_url} for white agent")
-    else:
-        print("[WARNING] white_agent_url is empty - agent card will use localhost")
-    start_white_agent()
+    agent_url = get_agent_url()
+    if agent_url:
+        print(f"[URL] {agent_url}")
+    start_white_agent(public_url=agent_url)
+
 
 @app.command()
 def run():
-    """Run the agent based on environment variables."""
+    """Run the agent based on environment variables (used by AgentBeats controller)."""
     settings = TaubenchSettings()
+    agent_url = get_agent_url()
     
-    # Set AGENT_URL based on role so agents use the correct public URL
+    if agent_url:
+        print(f"[URL] {agent_url} ({settings.role})")
+    
     if settings.role == "green":
-        if settings.green_agent_url:
-            os.environ["AGENT_URL"] = settings.green_agent_url
-            print(f"Setting AGENT_URL={settings.green_agent_url} for green agent")
-        start_green_agent(host=settings.host, port=settings.agent_port)
+        start_green_agent(host=settings.host, port=settings.agent_port, public_url=agent_url)
     elif settings.role == "white":
-        if settings.white_agent_url:
-            os.environ["AGENT_URL"] = settings.white_agent_url
-            print(f"Setting AGENT_URL={settings.white_agent_url} for white agent")
-        start_white_agent(host=settings.host, port=settings.agent_port)
+        start_white_agent(host=settings.host, port=settings.agent_port, public_url=agent_url)
     else:
         raise ValueError(f"Unknown role: {settings.role}")
 

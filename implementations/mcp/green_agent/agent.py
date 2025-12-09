@@ -295,26 +295,28 @@ class TauGreenAgentExecutor(AgentExecutor):
         pass
 
 
-def start_green_agent(agent_name="tau_green_agent_mcp", host="localhost", port=9006, **kwargs):
+def start_green_agent(agent_name="tau_green_agent_mcp", host="localhost", port=9006, public_url=None):
     """
     Start the green agent server.
-
-    VERSION using AgentBeats SDK patterns.
+    
+    Args:
+        agent_name: Name of the agent
+        host: Host to bind to
+        port: Port to bind to
+        public_url: Public URL for the agent card (from CLOUDRUN_HOST).
+                    If None, uses localhost.
     """
-    import os
     print("Starting green agent (mcp ready version)...")
-    if kwargs:
-        print(f"Green agent received additional kwargs: {kwargs}")
     
     agent_card_dict = load_agent_card_toml(agent_name)
     
-    # Determine the public URL for the agent card
-    # Priority: AGENT_URL env var > construct from host/port (using localhost for 0.0.0.0)
-    url = os.environ.get("AGENT_URL")
-    if not url:
-        # Use localhost for the URL even when binding to 0.0.0.0
+    # URL for agent card: use public_url if provided, otherwise localhost
+    if public_url:
+        url = public_url
+    else:
         url_host = "localhost" if host in ("0.0.0.0", "127.0.0.1") else host
         url = f"http://{url_host}:{port}"
+    
     agent_card_dict["url"] = url
     print(f"Green agent URL: {url}")
 

@@ -193,46 +193,46 @@ class GeneralWhiteAgentExecutor(AgentExecutor):
         print("[SECURITY] White agent memory completely cleared (reset called)")
 
 
-def start_white_agent(agent_name="general_white_agent", host="localhost", port=9004, **kwargs):
+def start_white_agent(agent_name="general_white_agent", host="localhost", port=9004, public_url=None):
+    """
+    Start the white agent server.
+    
+    Args:
+        agent_name: Name of the agent
+        host: Host to bind to
+        port: Port to bind to
+        public_url: Public URL for the agent card (from CLOUDRUN_HOST). 
+                    If None, uses localhost.
+    """
     # FORCE logging configuration for white agent
-    # Clear any existing handlers and configure fresh
     root_logger = logging.getLogger()
     
-    # Remove all existing handlers
     for handler in root_logger.handlers[:]:
         root_logger.removeHandler(handler)
     
-    # Create new handlers with force=True
     file_handler = logging.FileHandler('white_agent.log', mode='a')
     file_handler.setFormatter(logging.Formatter('%(asctime)s - %(name)s - %(levelname)s - %(message)s'))
     
     stream_handler = logging.StreamHandler(sys.stdout)
     stream_handler.setFormatter(logging.Formatter('%(asctime)s - %(name)s - %(levelname)s - %(message)s'))
     
-    # Add handlers
     root_logger.addHandler(file_handler)
     root_logger.addHandler(stream_handler)
     root_logger.setLevel(logging.INFO)
     
-    # Also configure the white_agent logger specifically
     logger.handlers.clear()
     logger.addHandler(file_handler)
     logger.addHandler(stream_handler)
     logger.setLevel(logging.INFO)
-    # Prevent duplicate logging via root handlers
     logger.propagate = False
     
     print("Starting white agent...")
     logger.info("Starting white agent...")
 
-    if kwargs:
-        print(f"White agent received additional kwargs: {kwargs}")
-
-    # Determine the public URL for the agent card
-    # Priority: AGENT_URL env var > construct from host/port (using localhost for 0.0.0.0)
-    url = os.environ.get("AGENT_URL")
-    if not url:
-        # Use localhost for the URL even when binding to 0.0.0.0
+    # URL for agent card: use public_url if provided, otherwise localhost
+    if public_url:
+        url = public_url
+    else:
         url_host = "localhost" if host in ("0.0.0.0", "127.0.0.1") else host
         url = f"http://{url_host}:{port}"
     print(f"White agent URL: {url}")

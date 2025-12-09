@@ -1,0 +1,42 @@
+{
+  "additionalInterfaces": null,
+  "capabilities": {
+    "extensions": null,
+    "pushNotifications": null,
+    "stateTransitionHistory": null,
+    "streaming": true
+  },
+  "defaultInputModes": [
+    "text/plain"
+  ],
+  "defaultOutputModes": [
+    "text/plain"
+  ],
+  "description": "Retail customer service agent being tested by tau-bench",
+  "documentationUrl": null,
+  "iconUrl": null,
+  "name": "tau_white_agent",
+  "preferredTransport": "JSONRPC",
+  "protocolVersion": "0.3.0",
+  "provider": null,
+  "security": null,
+  "securitySchemes": null,
+  "signatures": null,
+  "skills": [
+    {
+      "description": "Handles user requests and completes tasks",
+      "examples": [],
+      "id": "task_fulfillment",
+      "inputModes": null,
+      "name": "Task Fulfillment",
+      "outputModes": null,
+      "security": null,
+      "tags": [
+        "general"
+      ]
+    }
+  ],
+  "supportsAuthenticatedExtendedCard": null,
+  "url": "https://slides-electrical-theater-attorney.trycloudflare.com",
+  "version": "1.0.0"
+}
