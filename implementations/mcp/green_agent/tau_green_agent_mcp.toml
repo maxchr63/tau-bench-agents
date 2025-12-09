@@ -11,7 +11,7 @@ streaming = true
 # Pass@k evaluation configuration
 [pass_k_config]
 mode = "manual"                      # "manual" or "random"
-k = 2                                # Number of attempts per task (must be even for k/2 calculation)
+k = 4                                # Number of attempts per task (must be even for k/2 calculation)
 domain = "airline"                   # For manual mode: "retail" or "airline"
 task_id = 1                          # For manual mode: specific task to test (0-based index)
 num_battles = 2                      # For random mode: how many different random tasks to test
