@@ -1,7 +1,11 @@
 #!/bin/bash
 # Test script to verify OpenRouter configuration is working
 
-cd /Users/max/Documents/Uni/Berkeley/agentic_ai/tau-bench-agents
+set -euo pipefail
+
+# Move to repo root (script is in ./scripts/)
+REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+cd "$REPO_ROOT"
 
 echo "==============================================="
 echo "TESTING OPENROUTER CONFIGURATION"
@@ -9,7 +13,7 @@ echo "==============================================="
 
 echo ""
 echo "1. Testing shared_config.py directly..."
-.venv/bin/python3 implementations/mcp/shared_config.py
+uv run python implementations/mcp/shared_config.py
 
 echo ""
 echo "==============================================="

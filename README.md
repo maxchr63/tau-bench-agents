@@ -96,15 +96,16 @@ This implementation includes **three white agent variants** for comparative eval
 
 ### Available Variants
 
-| Variant | Port | Conversation Memory | Explicit Reasoning | Speed | Expected Performance |
-|---------|------|-------------------|-------------------|--------|---------------------|
-| **Stateless** | 9014 | ❌ None | ❌ No | 🚀 Fast | ⬇️ Worse (no memory hurts multi-turn tasks) |
-| **Baseline** | 9004 | ✅ Yes | ❌ No | ⚡ Medium | ➡️ Reference point |
-| **Reasoning** | 9024 | ✅ Yes | ✅ Yes | 🐌 Slower | ⬆️ Better (explicit reasoning helps) |
+| Variant       | Port | Conversation Memory | Explicit Reasoning | Speed     | Expected Performance                        |
+| ------------- | ---- | ------------------- | ------------------ | --------- | ------------------------------------------- |
+| **Stateless** | 9014 | ❌ None             | ❌ No              | 🚀 Fast   | ⬇️ Worse (no memory hurts multi-turn tasks) |
+| **Baseline**  | 9004 | ✅ Yes              | ❌ No              | ⚡ Medium | ➡️ Reference point                          |
+| **Reasoning** | 9024 | ✅ Yes              | ✅ Yes             | 🐌 Slower | ⬆️ Better (explicit reasoning helps)        |
 
 ### Quick Launch Commands
 
 **Individual agents:**
+
 ```bash
 # Baseline agent (default)
 uv run python main.py white
@@ -117,11 +118,12 @@ uv run python main.py white-reasoning
 ```
 
 **With AgentBeats via environment variable:**
+
 ```bash
 # Launch stateless variant
 AGENT_VARIANT=stateless ./scripts/start_mcp.sh
 
-# Launch reasoning variant  
+# Launch reasoning variant
 AGENT_VARIANT=reasoning ./scripts/start_mcp.sh
 
 # Launch baseline (default)
@@ -131,16 +133,19 @@ AGENT_VARIANT=reasoning ./scripts/start_mcp.sh
 ### Variant Details
 
 **Stateless Agent (`agent_stateless.py`):**
+
 - **NO conversation memory** - treats each request as a fresh conversation
 - Useful for demonstrating the importance of conversation state in multi-turn tasks
 - Expected to perform worse on complex tasks requiring context
 
 **Baseline Agent (`agent.py`):**
+
 - Maintains conversation memory across turns (stores message history per context)
 - Standard JSON-formatted responses without explicit reasoning
 - Serves as the reference point for comparison
 
 **Reasoning-Enhanced Agent (`agent_reasoning.py`):**
+
 - Maintains conversation memory (same as baseline)
 - **Explicit reasoning steps** using `<reasoning>` tags before taking actions
 - **Enhanced system prompt** that specifically conditions the agent to:
@@ -230,6 +235,7 @@ USE_PROVIDER = "openrouter"  # Change to "openai" or "openrouter"
 
   - Requires: `OPENROUTER_API_KEY` in `.env`
   - Model: `anthropic/claude-haiku-4.5`
+
 - `"openai"` - Use OpenAI directly
 
   - Requires: `OPENAI_API_KEY` in `.env`
@@ -281,8 +287,8 @@ TAU_USER_PROVIDER = "openrouter"
 
 ### Port Mapping
 
-| Component                    | Port | URL                   | Purpose                |
-| ---------------------------- | ---- | --------------------- | ---------------------- |
+| Component              | Port | URL                   | Purpose                |
+| ---------------------- | ---- | --------------------- | ---------------------- |
 | **MCP Green Launcher** | 9111 | http://localhost:9111 | FastAPI control server |
 | **MCP Green Agent**    | 9006 | http://localhost:9006 | A2A agent server       |
 | **White Launcher**     | 9210 | http://localhost:9210 | FastAPI control server |
@@ -782,15 +788,11 @@ tau-bench-agents/
 │   │   └── white_agent/
 │   │       ├── agent.py                  # White agent server
 │   │       └── tau_white_agent.toml      # White agent config
-│   └── a2a/                              # A2A implementation (alternative)
-│       ├── green_agent/
-│       └── white_agent/
 ├── launchers/
 │   ├── green_launcher_mcp.py             # Green launcher (port 9111)
 │   └── white_launcher.py                 # White launcher (port 9210)
 ├── scripts/
 │   ├── start_mcp.sh                      # Start MCP agents
-│   ├── start_a2a.sh                      # Start A2A agents
 │   ├── check_status.sh                   # Verify system status
 │   └── use_openrouter.sh                 # Switch to OpenRouter
 ├── main.py                               # CLI entry point
@@ -810,9 +812,6 @@ Explicit client closure in finally blocks
 ```bash
 # Start MCP agents
 ./scripts/start_mcp.sh
-
-# Start A2A agents (alternative)
-./scripts/start_a2a.sh
 
 # Check status
 ./scripts/check_status.sh
@@ -854,8 +853,8 @@ task_id = 1
 
 ### Agent URLs for AgentBeats
 
-| Component                    | Port | URL                   |
-| ---------------------------- | ---- | --------------------- |
+| Component              | Port | URL                   |
+| ---------------------- | ---- | --------------------- |
 | **MCP Green Agent**    | 9006 | http://localhost:9006 |
 | **MCP Green Launcher** | 9111 | http://localhost:9111 |
 | **White Agent**        | 9004 | http://localhost:9004 |

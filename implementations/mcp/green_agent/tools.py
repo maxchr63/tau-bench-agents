@@ -177,8 +177,15 @@ async def send_message_to_white_agent(
 
 async def reset_white_agent(white_agent_url: str, timeout: float = 30.0) -> Dict[str, Any]:
     """
-    Reset the white agent's memory state by restarting it via the launcher.
-    This ensures complete memory isolation between evaluation attempts.
+    Reset the white agent between evaluation attempts.
+
+    Supports two execution modes:
+    1) **AgentBeats/Earthshaker controller mode (v2)**: white_agent_url is a proxied URL
+       like `https://<host>/to_agent/<agent_id>`. In this case, we call the controller's
+       reset endpoint: `POST /agents/<agent_id>/reset`.
+    2) **Legacy launcher mode (v1/dev)**: white_agent_url includes a host:port for the
+       agent itself (e.g. `http://localhost:9004`). In this case, we attempt to reset
+       via the local launcher on port 9210.
 
     Args:
         white_agent_url: URL of the white agent (e.g., http://localhost:9004)
@@ -190,17 +197,64 @@ async def reset_white_agent(white_agent_url: str, timeout: float = 30.0) -> Dict
     global _cached_agent_card, _card_cache_url
 
     try:
-        import re
         import asyncio
+        from urllib.parse import urlparse
 
         logger.info(f"[RESET] Resetting white agent at {white_agent_url}")
 
-        # Extract host and port from URL
-        match = re.match(r'https?://([^:]+):(\d+)', white_agent_url)
-        if not match:
+        parsed = urlparse(white_agent_url)
+        if not parsed.scheme or not parsed.netloc:
             return {"success": False, "error": "Invalid URL format"}
 
-        host, port = match.groups()
+        # ------------------------------------------------------------
+        # v2 (controller proxy) reset: https://<host>/to_agent/<agent_id>
+        # ------------------------------------------------------------
+        marker = "/to_agent/"
+        if marker in (parsed.path or ""):
+            after = parsed.path.split(marker, 1)[1]
+            agent_id = after.split("/", 1)[0].strip()
+            if not agent_id:
+                return {"success": False, "error": "Could not parse agent_id from to_agent URL"}
+
+            controller_base = f"{parsed.scheme}://{parsed.netloc}"
+            reset_url = f"{controller_base}/agents/{agent_id}/reset"
+
+            httpx_client = _get_httpx_client(timeout)
+            try:
+                resp = await httpx_client.post(reset_url, timeout=timeout)
+                if resp.status_code not in (200, 204):
+                    _cached_agent_card = None
+                    _card_cache_url = None
+                    return {"success": False, "error": f"Controller reset returned {resp.status_code}"}
+
+                # Wait for agent to be ready again
+                start = asyncio.get_event_loop().time()
+                probe_url = f"{white_agent_url.rstrip('/')}/.well-known/agent-card.json"
+                while (asyncio.get_event_loop().time() - start) < timeout:
+                    try:
+                        probe = await httpx_client.get(probe_url, timeout=5.0)
+                        if probe.status_code == 200:
+                            _cached_agent_card = None
+                            _card_cache_url = None
+                            return {"success": True, "message": "White agent reset via controller"}
+                    except Exception:
+                        pass
+                    await asyncio.sleep(0.5)
+
+                _cached_agent_card = None
+                _card_cache_url = None
+                return {"success": False, "error": "Timed out waiting for agent after controller reset"}
+            finally:
+                await httpx_client.aclose()
+
+        # ------------------------------------------------------------
+        # Legacy launcher reset: http(s)://host:port
+        # ------------------------------------------------------------
+        host = parsed.hostname
+        port = parsed.port
+        if not host or not port:
+            return {"success": False, "error": "Invalid URL format (missing host/port)"}
+
         launcher_url = f"http://{host}:9210"
 
         httpx_client = _get_httpx_client(timeout)

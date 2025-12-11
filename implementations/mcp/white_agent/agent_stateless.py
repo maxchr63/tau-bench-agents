@@ -6,7 +6,12 @@ Expected to perform WORSE than baseline due to lack of context in multi-turn con
 
 # CRITICAL: Import shared config FIRST to configure LiteLLM globally
 import sys
-sys.path.insert(0, '/Users/max/Documents/Uni/Berkeley/agentic_ai/tau-bench-agents')
+import os
+from pathlib import Path
+
+_project_root = str(Path(__file__).parent.parent.parent)
+if _project_root not in sys.path:
+    sys.path.insert(0, _project_root)
 from implementations.mcp.shared_config import TAU_USER_MODEL, TAU_USER_PROVIDER
 
 import logging
@@ -157,7 +162,7 @@ class StatelessWhiteAgentExecutor(AgentExecutor):
         pass
 
 
-def start_white_agent(agent_name="stateless_white_agent", host="localhost", port=9014):
+def start_white_agent(agent_name="stateless_white_agent", host="localhost", port=9014, public_url=None):
     """Start stateless white agent on port 9014 (different from baseline 9004)."""
     # FORCE logging configuration for white agent
     root_logger = logging.getLogger()
@@ -188,7 +193,18 @@ def start_white_agent(agent_name="stateless_white_agent", host="localhost", port
 
     print("Starting stateless white agent (NO conversation memory)...")
     logger.info("Starting stateless white agent (NO conversation memory)...")
-    url = f"http://{host}:{port}"
+
+    # URL for agent card: prefer explicit public_url, then controller-injected AGENT_URL, else localhost
+    if public_url:
+        url = str(public_url).rstrip("/")
+    else:
+        env_url = os.environ.get("AGENT_URL")
+        if env_url:
+            url = env_url.rstrip("/")
+        else:
+            url_host = "localhost" if host in ("0.0.0.0", "127.0.0.1") else host
+            url = f"http://{url_host}:{port}"
+
     card = prepare_white_agent_card(url)
 
     request_handler = DefaultRequestHandler(
@@ -201,7 +217,19 @@ def start_white_agent(agent_name="stateless_white_agent", host="localhost", port
         http_handler=request_handler,
     )
 
-    uvicorn.run(app.build(), host=host, port=port)
+    starlette_app = app.build()
+    try:
+        from starlette.responses import JSONResponse
+        from starlette.requests import Request
+
+        async def health(_: Request):
+            return JSONResponse({"status": "ok", "agent": "white_stateless"})
+
+        starlette_app.add_route("/health", health, methods=["GET"])
+    except Exception:
+        pass
+
+    uvicorn.run(starlette_app, host=host, port=port)
 
 
 if __name__ == "__main__":

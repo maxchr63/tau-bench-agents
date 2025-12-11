@@ -14,23 +14,19 @@ project_root = Path(__file__).parent.parent
 sys.path.insert(0, str(project_root))
 
 import asyncio
-import agentbeats as ab
 
 
 async def test_tool_registration():
-    """Test that tools are properly registered with @ab.tool."""
+    """Test that the expected tool functions exist and are callable."""
     print("=" * 80)
     print("Test 1: Tool Registration")
     print("=" * 80)
     print()
 
-    # Import tools module to trigger registration
+    # Import tools module
     from implementations.mcp.green_agent import tools as green_tools
 
-    # Get registered tools
-    registered_tools = ab.get_registered_tools()
-
-    print(f"✓ Registered {len(registered_tools)} tools")
+    print("✓ Imported implementations.mcp.green_agent.tools")
     print()
 
     expected_tools = [
@@ -45,16 +41,15 @@ async def test_tool_registration():
         "format_evaluation_result",
     ]
 
-    found_tools = [tool.__name__ for tool in registered_tools]
-
     for expected in expected_tools:
-        if expected in found_tools:
+        tool_obj = getattr(green_tools, expected, None)
+        if callable(tool_obj):
             print(f"  ✓ {expected}")
         else:
             print(f"  ✗ {expected} (MISSING)")
 
     print()
-    return len(registered_tools) >= len(expected_tools)
+    return all(callable(getattr(green_tools, name, None)) for name in expected_tools)
 
 
 async def test_list_tau_bench_tools():

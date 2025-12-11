@@ -4,7 +4,7 @@
 Example MCP Server for Tau-Bench Tools
 
 This demonstrates how to expose tau-bench evaluation tools via an MCP server
-using the AgentBeats SDK and @ab.tool decorators.
+by introspecting the tool functions in `implementations/mcp/green_agent/tools.py`.
 """
 
 import sys
@@ -17,8 +17,6 @@ sys.path.insert(0, str(project_root))
 import asyncio
 import logging
 from typing import Any, Dict, List
-
-import agentbeats as ab
 
 # Import tools to register them
 from implementations.mcp.green_agent import tools as green_tools
@@ -36,8 +34,23 @@ class TauBenchMCPServer:
     """
 
     def __init__(self):
-        self.tools = ab.get_registered_tools()
-        logger.info(f"Initialized TauBenchMCPServer with {len(self.tools)} tools")
+        # Collect public callables defined in the green_tools module
+        import inspect
+
+        self.tools = []
+        for name, obj in vars(green_tools).items():
+            if name.startswith("_"):
+                continue
+            if not callable(obj):
+                continue
+            if getattr(obj, "__module__", None) != green_tools.__name__:
+                continue
+            # Skip classes
+            if inspect.isclass(obj):
+                continue
+            self.tools.append(obj)
+
+        logger.info(f"Initialized TauBenchMCPServer with {len(self.tools)} tools (module introspection)")
 
     def list_tools(self) -> List[Dict[str, Any]]:
         """

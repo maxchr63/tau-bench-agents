@@ -330,4 +330,16 @@ def start_green_agent(agent_name="tau_green_agent_mcp", host="localhost", port=9
         http_handler=request_handler,
     )
 
-    uvicorn.run(app.build(), host=host, port=port)
+    starlette_app = app.build()
+    try:
+        from starlette.responses import JSONResponse
+        from starlette.requests import Request
+
+        async def health(_: Request):
+            return JSONResponse({"status": "ok", "agent": "green"})
+
+        starlette_app.add_route("/health", health, methods=["GET"])
+    except Exception:
+        pass
+
+    uvicorn.run(starlette_app, host=host, port=port)
