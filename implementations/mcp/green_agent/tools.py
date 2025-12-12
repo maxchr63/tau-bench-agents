@@ -1048,7 +1048,9 @@ User message: {obs}
     pass_k = all(success_flags[0:k])
 
     # pass^(k/2): Any window of k/2 consecutive successes
-    k_half = k // 2
+    # NOTE: If k == 1, k//2 == 0 which would make this metric meaningless.
+    # Clamp to at least 1 so the metric remains well-defined.
+    k_half = max(1, k // 2)
     pass_k_half = any(
         all(success_flags[i:i+k_half])
         for i in range(len(success_flags) - k_half + 1)

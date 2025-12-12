@@ -6,7 +6,7 @@ defaultInputModes = ["text"]
 defaultOutputModes = ["text"]
 
 [capabilities]
-streaming = true
+streaming = false
 
 [[skills]]
 id = "retail_customer_service"

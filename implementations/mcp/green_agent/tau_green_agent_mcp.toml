@@ -6,7 +6,7 @@ battle_timeout = 1050
 defaultInputModes = ["text"]
 defaultOutputModes = ["text"]
 [capabilities]
-streaming = true
+streaming = false
 
 # Pass@k evaluation configuration
 [pass_k_config]
