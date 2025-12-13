@@ -15,6 +15,9 @@ if [ -f "$PROJECT_ROOT/.env" ]; then
 fi
 
 # Set provider to OpenAI
+# Preferred env var (used by Python code): USE_PROVIDER
+# Legacy env var (older scripts): LLM_PROVIDER
+export USE_PROVIDER="openai"
 export LLM_PROVIDER="openai"
 unset OPENROUTER_API_KEY
 unset OPENROUTER_MODEL

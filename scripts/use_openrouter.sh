@@ -26,15 +26,18 @@ if [ -z "$OPENROUTER_API_KEY" ]; then
 fi
 
 # Set provider to OpenRouter
+# Preferred env var (used by Python code): USE_PROVIDER
+# Legacy env var (older scripts): LLM_PROVIDER
+export USE_PROVIDER="openrouter"
 export LLM_PROVIDER="openrouter"
 
-# Optional: Set specific model (default is openai/gpt-4o-mini)
+# Optional: Set specific model (shared_config.py will normalize it for OpenRouter)
 # Uncomment and modify to use a different model:
+# export OPENROUTER_MODEL="openai/gpt-4o-mini"
 # export OPENROUTER_MODEL="anthropic/claude-3.5-sonnet"
-# export OPENROUTER_MODEL="google/gemini-pro-1.5"
-# export OPENROUTER_MODEL="meta-llama/llama-3.1-8b-instruct"
+# export OPENROUTER_MODEL="openai/gpt-5-nano"
 
 echo "✅ OpenRouter configured!"
-echo "   Model: ${OPENROUTER_MODEL:-openai/gpt-4o-mini}"
+echo "   Model: ${OPENROUTER_MODEL:-anthropic/claude-haiku-4.5}"
 echo ""
 echo "Now run your agent with: ./scripts/start_mcp.sh"

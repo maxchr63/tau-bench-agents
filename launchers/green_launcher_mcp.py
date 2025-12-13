@@ -52,30 +52,29 @@ async def launch():
         )
     
     project_root = Path(__file__).parent.parent
-    cmd = [
-        "uv", "run", "python", "-c",
-        f"""
-import sys
-sys.path.insert(0, '{project_root}')
-from implementations.mcp.green_agent.agent import start_green_agent
-start_green_agent('{agent_config['name']}', '{agent_config['host']}', {agent_config['port']})
-"""
-    ]
+    cmd = ["uv", "run", "python", "main.py", "run"]
+
+    env = {**os.environ}
+    env["ROLE"] = "green"
+    env["HOST"] = agent_config["host"]
+    env["AGENT_PORT"] = str(agent_config["port"])
     
     agent_process = subprocess.Popen(
         cmd,
         cwd=project_root,
-        stdout=subprocess.PIPE,
-        stderr=subprocess.PIPE,
-        env={**os.environ}
+        stdout=None,
+        stderr=None,
+        env=env,
     )
     
     import asyncio
     await asyncio.sleep(3)
     
     if agent_process.poll() is not None:
-        stderr = agent_process.stderr.read().decode() if agent_process.stderr else "No error output"
-        raise HTTPException(status_code=500, detail=f"Failed to start MCP agent: {stderr}")
+        raise HTTPException(
+            status_code=500,
+            detail=f"Failed to start MCP agent (exit={agent_process.returncode})",
+        )
     
     return LaunchResponse(
         status="launched",
@@ -116,30 +115,29 @@ async def reset(request: dict):
 
     # Relaunch
     project_root = Path(__file__).parent.parent
-    cmd = [
-        "uv", "run", "python", "-c",
-        f"""
-import sys
-sys.path.insert(0, '{project_root}')
-from implementations.mcp.green_agent.agent import start_green_agent
-start_green_agent('{agent_config['name']}', '{agent_config['host']}', {agent_config['port']})
-"""
-    ]
+    cmd = ["uv", "run", "python", "main.py", "run"]
+
+    env = {**os.environ}
+    env["ROLE"] = "green"
+    env["HOST"] = agent_config["host"]
+    env["AGENT_PORT"] = str(agent_config["port"])
 
     agent_process = subprocess.Popen(
         cmd,
         cwd=project_root,
-        stdout=subprocess.PIPE,
-        stderr=subprocess.PIPE,
-        env={**os.environ}
+        stdout=None,
+        stderr=None,
+        env=env,
     )
 
     import asyncio
     await asyncio.sleep(3)
 
     if agent_process.poll() is not None:
-        stderr = agent_process.stderr.read().decode() if agent_process.stderr else "No error output"
-        raise HTTPException(status_code=500, detail=f"Failed to reset agent: {stderr}")
+        raise HTTPException(
+            status_code=500,
+            detail=f"Failed to reset agent (exit={agent_process.returncode})",
+        )
 
     # Notify backend that agent is ready
     if backend_url and agent_id:

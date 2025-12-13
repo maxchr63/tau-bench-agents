@@ -14,6 +14,12 @@ uv sync
 echo "OPENROUTER_API_KEY=your_key_here" >> .env
 ```
 
+**One-command local evaluation (like `agentify-example-tau-bench/`):**
+
+```bash
+uv run python main.py launch --domain retail --task-id 1 --variant baseline --k 1
+```
+
 **Run White Agent (agent being tested):**
 
 ```bash

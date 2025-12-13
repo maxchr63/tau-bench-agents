@@ -1,73 +1,80 @@
 """
 Shared LiteLLM configuration for all tau-bench agents.
-This MUST be imported before any other code that uses LiteLLM!
+
+Keep this module small + deterministic: import it before anything that calls LiteLLM.
 """
 
+from __future__ import annotations
+
 import os
+
 import litellm
 
-# ============================================================================
-# CENTRAL CONFIGURATION - Change provider here
-# ============================================================================
-USE_PROVIDER = os.environ.get("USE_PROVIDER", "openrouter")  # Options: "openai" or "openrouter"
-# ============================================================================
+# -----------------------------------------------------------------------------
+# Provider selection (accept a couple aliases to reduce "it doesn't work" cases)
+# -----------------------------------------------------------------------------
+# Preferred: USE_PROVIDER=openrouter|openai
+# Back-compat: LLM_PROVIDER=openrouter|openai (used by older shell scripts)
+USE_PROVIDER = (os.environ.get("USE_PROVIDER") or os.environ.get("LLM_PROVIDER") or "openrouter").strip().lower()
 
-# ============================================================================
-# CRITICAL: Global timeout to prevent hanging LLM calls that cause 100% CPU
-# ============================================================================
-litellm.request_timeout = 60  # 60 second timeout for all LLM requests
-litellm.num_retries = 1       # Only 1 retry to prevent retry storms
-# ============================================================================
+# -----------------------------------------------------------------------------
+# Global LiteLLM safety defaults (avoid hangs / retry storms)
+# -----------------------------------------------------------------------------
+litellm.request_timeout = float(os.environ.get("LITELLM_REQUEST_TIMEOUT", "60"))
+litellm.num_retries = int(os.environ.get("LITELLM_NUM_RETRIES", "1"))
 
-print(f"\n{'='*70}")
-print(f"🔧 CONFIGURING LiteLLM - Provider: {USE_PROVIDER}")
-print(f"   Timeout: {litellm.request_timeout}s, Retries: {litellm.num_retries}")
-print(f"{'='*70}\n")
+# GPT-5 and other providers can reject unsupported params; drop them automatically.
+litellm.drop_params = True
+
+
+def _openrouter_model(model: str) -> str:
+    """Normalize model naming for OpenRouter.
+
+    If user provides e.g. `openai/gpt-4o-mini`, convert to `openrouter/openai/gpt-4o-mini`.
+    """
+
+    model = (model or "").strip()
+    if not model:
+        return model
+    return model if model.startswith("openrouter/") else f"openrouter/{model}"
+
 
 if USE_PROVIDER == "openrouter":
-    # Configure for OpenRouter
-    TAU_USER_MODEL = os.environ.get("TAU_USER_MODEL", "openrouter/anthropic/claude-haiku-4.5")  # Free tier model "openrouter/anthropic/claude-haiku-4.5". "openrouter/openai/gpt-5-nano" 
-    TAU_USER_PROVIDER = os.environ.get("TAU_USER_PROVIDER", "openrouter") #openai
-    
-    # Set LiteLLM to use OpenRouter endpoint
-    litellm.api_base = "https://openrouter.ai/api/v1"
+    # Model can be set via TAU_USER_MODEL or OPENROUTER_MODEL for convenience.
+    _model = (
+        os.environ.get("TAU_USER_MODEL")
+        or os.environ.get("OPENROUTER_MODEL")
+        or "anthropic/claude-haiku-4.5"
+    )
+    TAU_USER_MODEL = _openrouter_model(_model)
+    TAU_USER_PROVIDER = os.environ.get("TAU_USER_PROVIDER", "openrouter")
+
+    litellm.api_base = os.environ.get("OPENROUTER_API_BASE", "https://openrouter.ai/api/v1")
     litellm.set_verbose = False
-    
-    # CRITICAL: GPT-5 models have strict parameter requirements
-    # Drop unsupported params like temperature=0.0 (gpt-5 only supports temperature=1)
-    litellm.drop_params = True
-    
-    # Get OpenRouter API key and set it as OPENAI_API_KEY
-    # (tau-bench looks up keys by provider name, so "openai" provider needs OPENAI_API_KEY)
-    OPENROUTER_API_KEY = os.environ.get("OPENROUTER_API_KEY", "")
-    if OPENROUTER_API_KEY:
-        os.environ["OPENAI_API_KEY"] = OPENROUTER_API_KEY
-        print(f"✅ LiteLLM configured for OpenRouter")
-        print(f"   Model: {TAU_USER_MODEL}")
-        print(f"   API Base: {litellm.api_base}")
-        print(f"   API Key: {OPENROUTER_API_KEY[:20]}...")
-    else:
-        print("⚠️  WARNING: OPENROUTER_API_KEY not found in environment!")
-        print("   Make sure your .env file has: OPENROUTER_API_KEY=sk-or-v1-...")
-        
+
+    # OpenRouter key (tau-bench sometimes looks for OPENAI_API_KEY even when routing elsewhere).
+    openrouter_key = os.environ.get("OPENROUTER_API_KEY", "")
+    if openrouter_key and not os.environ.get("OPENAI_API_KEY"):
+        os.environ["OPENAI_API_KEY"] = openrouter_key
+    if not openrouter_key:
+        print("[config] OPENROUTER_API_KEY is not set; OpenRouter calls will fail.")
+
 elif USE_PROVIDER == "openai":
-    # Configure for OpenAI (default)
-    TAU_USER_MODEL = os.environ.get("TAU_USER_MODEL", "gpt-4o-mini")
+    TAU_USER_MODEL = (
+        os.environ.get("TAU_USER_MODEL")
+        or os.environ.get("OPENAI_MODEL")
+        or "gpt-4o-mini"
+    )
     TAU_USER_PROVIDER = os.environ.get("TAU_USER_PROVIDER", "openai")
+
     litellm.set_verbose = False
-    
-    OPENAI_API_KEY = os.environ.get("OPENAI_API_KEY", "")
-    if OPENAI_API_KEY:
-        print(f"✅ LiteLLM configured for OpenAI")
-        print(f"   Model: {TAU_USER_MODEL}")
-        print(f"   API Key: {OPENAI_API_KEY[:20]}...")
-    else:
-        print("⚠️  WARNING: OPENAI_API_KEY not found in environment!")
-        
+    if not os.environ.get("OPENAI_API_KEY"):
+        print("[config] OPENAI_API_KEY is not set; OpenAI calls will fail.")
+
 else:
-    raise ValueError(f"Invalid USE_PROVIDER: {USE_PROVIDER}. Must be 'openai' or 'openrouter'")
+    raise ValueError(
+        f"Invalid provider {USE_PROVIDER!r}. Set USE_PROVIDER=openrouter|openai (or legacy LLM_PROVIDER)."
+    )
 
-print(f"\n{'='*70}\n")
 
-# Export these for use by other modules
 __all__ = ["USE_PROVIDER", "TAU_USER_MODEL", "TAU_USER_PROVIDER"]

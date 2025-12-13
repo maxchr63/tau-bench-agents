@@ -114,7 +114,7 @@ async def launch():
     if agent_process and agent_process.poll() is None:
         return LaunchResponse(
             status="already_running",
-            agent_url=f"http://{agent_config['host']}:{agent_config['port']}",
+            agent_url=public_url,
             agent_name=agent_config['name']
         )
     
@@ -133,19 +133,21 @@ async def launch():
         cwd=project_root,
         stdout=None,
         stderr=None,
-        env={**os.environ}
+        env=env,
     )
     
     import asyncio
     await asyncio.sleep(3)
     
     if agent_process.poll() is not None:
-        stderr = agent_process.stderr.read().decode() if agent_process.stderr else "No error output"
-        raise HTTPException(status_code=500, detail=f"Failed to start agent: {stderr}")
+        raise HTTPException(
+            status_code=500,
+            detail=f"Failed to start agent (exit={agent_process.returncode})",
+        )
     
     return LaunchResponse(
         status="launched",
-        agent_url=f"http://{agent_config['host']}:{agent_config['port']}",
+        agent_url=public_url,
         agent_name=agent_config['name']
     )
 
@@ -198,15 +200,17 @@ async def reset(request: dict):
         cwd=project_root,
         stdout=None,
         stderr=None,
-        env={**os.environ}
+        env=env,
     )
     
     import asyncio
     await asyncio.sleep(3)
     
     if agent_process.poll() is not None:
-        stderr = agent_process.stderr.read().decode() if agent_process.stderr else "No error output"
-        raise HTTPException(status_code=500, detail=f"Failed to reset agent: {stderr}")
+        raise HTTPException(
+            status_code=500,
+            detail=f"Failed to reset agent (exit={agent_process.returncode})",
+        )
     
     # Notify backend that agent is ready
     if backend_url and agent_id:

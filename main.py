@@ -1,5 +1,7 @@
 """CLI entry point for tau-bench-agents (AgentBeats v2 compatible)."""
 
+import asyncio
+import json
 import os
 import typer
 from pydantic_settings import BaseSettings, SettingsConfigDict
@@ -9,6 +11,7 @@ import dotenv
 dotenv.load_dotenv()
 
 from implementations.mcp.green_agent.agent import start_green_agent
+from implementations.mcp.my_util import my_a2a
 
 
 def _start_white_by_variant(*, host: str, port: int, public_url: str | None) -> None:
@@ -59,6 +62,16 @@ def get_agent_url() -> str | None:
     cloudrun_host = os.environ.get("CLOUDRUN_HOST")
     if not cloudrun_host:
         return None
+
+    # Accept a few common user inputs (with scheme or trailing slash) and
+    # normalize to a bare host so we don't accidentally generate URLs like
+    # `https://<host>//to_agent/...`.
+    cloudrun_host = cloudrun_host.strip()
+    if cloudrun_host.startswith("https://"):
+        cloudrun_host = cloudrun_host.removeprefix("https://")
+    elif cloudrun_host.startswith("http://"):
+        cloudrun_host = cloudrun_host.removeprefix("http://")
+    cloudrun_host = cloudrun_host.rstrip("/")
     
     https_enabled = os.environ.get("HTTPS_ENABLED", "true").lower() in ("true", "1", "yes")
     protocol = "https" if https_enabled else "http"
@@ -111,6 +124,142 @@ def run():
         _start_white_by_variant(host=settings.host, port=settings.agent_port, public_url=agent_url)
     else:
         raise ValueError(f"Unknown role: {role}")
+
+@app.command()
+def launch(
+    domain: str = "retail",
+    task_id: int = 5,
+    variant: str = "baseline",
+    k: int = 1,
+    max_num_steps: int = 30,
+    reset_between_attempts: bool = False,
+):
+    """Launch a complete local evaluation (like agentify-example)."""
+
+    async def _run() -> None:
+        import multiprocessing
+
+        # Ports match this repo's default AgentBeats setup.
+        green_address = ("localhost", 9006)
+        green_url = f"http://{green_address[0]}:{green_address[1]}"
+
+        variant_norm = (variant or "baseline").strip().lower()
+        if variant_norm == "stateless":
+            from implementations.mcp.white_agent.agent_stateless import start_white_agent as start_white_agent
+            white_port = 9014
+        elif variant_norm == "reasoning":
+            from implementations.mcp.white_agent.agent_reasoning import start_white_agent as start_white_agent
+            white_port = 9024
+        else:
+            variant_norm = "baseline"
+            from implementations.mcp.white_agent.agent import start_white_agent as start_white_agent
+            white_port = 9004
+        white_address = ("localhost", white_port)
+        white_url = f"http://{white_address[0]}:{white_address[1]}"
+
+        p_green = multiprocessing.Process(
+            target=start_green_agent,
+            args=("tau_green_agent_mcp", *green_address),
+            kwargs={"public_url": None},
+        )
+        p_white = multiprocessing.Process(
+            target=start_white_agent,
+            kwargs={"host": white_address[0], "port": white_address[1], "public_url": None},
+        )
+
+        try:
+            print(f"Launching green agent at {green_url} ...")
+            p_green.start()
+            assert await my_a2a.wait_agent_ready(green_url), "Green agent not ready in time"
+            print("Green agent is ready.")
+
+            print(f"Launching white agent ({variant_norm}) at {white_url} ...")
+            p_white.start()
+            assert await my_a2a.wait_agent_ready(white_url), "White agent not ready in time"
+            print("White agent is ready.")
+
+            # Send the task description to the green agent (agentify-example style).
+            task_config: dict[str, object] = {
+                "env": domain,
+                "user_strategy": "llm",
+                "task_split": "test",
+                "task_ids": [task_id],
+                # extra knobs supported by our green agent:
+                "k": k,
+                "max_num_steps": max_num_steps,
+                "reset_between_attempts": reset_between_attempts,
+            }
+
+            task_text = f"""
+Your task is to instantiate tau-bench to test the agent located at:
+<white_agent_url>
+{white_url}
+</white_agent_url>
+You should use the following env configuration:
+<env_config>
+{json.dumps(task_config, indent=2)}
+</env_config>
+            """.strip()
+
+            print("Sending task description to green agent...")
+            response = await my_a2a.send_message(green_url, task_text)
+            print("Response from green agent:")
+            print(response)
+        finally:
+            # Best-effort cleanup
+            for p in (p_green, p_white):
+                try:
+                    if p.is_alive():
+                        p.terminate()
+                except Exception:
+                    pass
+            for p in (p_green, p_white):
+                try:
+                    p.join(timeout=3)
+                except Exception:
+                    pass
+
+    asyncio.run(_run())
+
+
+@app.command("launch_remote")
+def launch_remote(
+    green_url: str,
+    white_url: str,
+    domain: str = "retail",
+    task_id: int = 5,
+    k: int = 1,
+    max_num_steps: int = 30,
+    reset_between_attempts: bool = False,
+):
+    """Send a tau-bench evaluation request to an existing green agent."""
+
+    async def _run() -> None:
+        task_config: dict[str, object] = {
+            "env": domain,
+            "user_strategy": "llm",
+            "task_split": "test",
+            "task_ids": [task_id],
+            "k": k,
+            "max_num_steps": max_num_steps,
+            "reset_between_attempts": reset_between_attempts,
+        }
+
+        task_text = f"""
+Your task is to instantiate tau-bench to test the agent located at:
+<white_agent_url>
+{white_url.rstrip('/')}
+</white_agent_url>
+You should use the following env configuration:
+<env_config>
+{json.dumps(task_config, indent=2)}
+</env_config>
+        """.strip()
+
+        response = await my_a2a.send_message(green_url.rstrip("/"), task_text)
+        print(response)
+
+    asyncio.run(_run())
 
 
 @app.command()

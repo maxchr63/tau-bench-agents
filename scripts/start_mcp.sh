@@ -34,11 +34,12 @@ case $AGENT_VARIANT in
         ;;
 esac
 
-# Show LLM provider configuration
-if [ "$LLM_PROVIDER" = "openrouter" ]; then
-    echo "�� Using OpenRouter (model: ${OPENROUTER_MODEL:-openai/gpt-4o-mini})"
+# Show LLM provider configuration (match implementations/mcp/shared_config.py)
+PROVIDER="${USE_PROVIDER:-${LLM_PROVIDER:-openrouter}}"
+if [ "$PROVIDER" = "openrouter" ]; then
+    echo "Using OpenRouter (model: ${TAU_USER_MODEL:-${OPENROUTER_MODEL:-anthropic/claude-haiku-4.5}})"
 else
-    echo "🤖 Using OpenAI (default)"
+    echo "Using OpenAI (model: ${TAU_USER_MODEL:-${OPENAI_MODEL:-gpt-4o-mini}})"
 fi
 echo "🎯 White Agent Variant: $VARIANT_NAME"
 echo "   Features: $VARIANT_DESC"

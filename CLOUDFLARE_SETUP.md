@@ -31,20 +31,20 @@ Use the tunnel URLs (**without** `https://` prefix) to start each agent:
 
 ```bash
 # Green agent
-HTTPS_ENABLED=true CLOUDRUN_HOST=[green-tunnel-url] ROLE=green uv run agentbeats run_ctrl
+HTTPS_ENABLED=true CLOUDRUN_HOST=[green-tunnel-url] ROLE=green uv run python scripts/run_ctrl_normalized.py
 
 # White agent (note the PORT=8011 to avoid port conflict)
-PORT=8011 HTTPS_ENABLED=true CLOUDRUN_HOST=[white-tunnel-url] ROLE=white uv run agentbeats run_ctrl
+PORT=8011 HTTPS_ENABLED=true CLOUDRUN_HOST=[white-tunnel-url] ROLE=white uv run python scripts/run_ctrl_normalized.py
 ```
 
 ### Example
 
 ```bash
 # Green agent
-HTTPS_ENABLED=true CLOUDRUN_HOST=advisor-diary-milk-easter.trycloudflare.com ROLE=green uv run agentbeats run_ctrl
+HTTPS_ENABLED=true CLOUDRUN_HOST=advisor-diary-milk-easter.trycloudflare.com ROLE=green uv run python scripts/run_ctrl_normalized.py
 
 # White agent
-PORT=8011 HTTPS_ENABLED=true CLOUDRUN_HOST=slides-electrical-theater-attorney.trycloudflare.com ROLE=white uv run agentbeats run_ctrl
+PORT=8011 HTTPS_ENABLED=true CLOUDRUN_HOST=slides-electrical-theater-attorney.trycloudflare.com ROLE=white uv run python scripts/run_ctrl_normalized.py
 ```
 
 ## Key Environment Variables
@@ -80,5 +80,6 @@ Expected response:
 2. **Use different ports** for each agent to avoid conflicts (8010 for green, 8011 for white)
 3. **Tunnel URLs are temporary** - they change each time you restart cloudflared
 4. **Use a Berkeley GitHub account** - This is essential for assessments to be processed. Without it, assessments will stay in "pending" status indefinitely.
+5. `scripts/run_ctrl_normalized.py` also runs each controller from an isolated working directory so two controllers don’t clobber `.ab/agents`, and sanitizes `CLOUDRUN_HOST` so generated agent URLs don’t contain accidental `//to_agent/...` (e.g. if a trailing slash was included).
 
 Now you can simply add them on the v2 UI and test them!

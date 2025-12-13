@@ -13,14 +13,14 @@ WHITE_RUNNING=$(lsof -i :9210 -t 2>/dev/null)
 
 if [ -z "$GREEN_RUNNING" ]; then
     echo "❌ Green launcher is NOT running on port 9111"
-    echo "   Start it: cd $(dirname "$0") && uv run python src/green_launcher.py"
+    echo "   Start it: uv run python launchers/green_launcher_mcp.py"
 else
     echo "✅ Green launcher is running (PID: $GREEN_RUNNING)"
 fi
 
 if [ -z "$WHITE_RUNNING" ]; then
     echo "❌ White launcher is NOT running on port 9210"
-    echo "   Start it: cd $(dirname "$0") && uv run python src/white_launcher.py"
+    echo "   Start it: uv run python launchers/white_launcher.py"
 else
     echo "✅ White launcher is running (PID: $WHITE_RUNNING)"
 fi

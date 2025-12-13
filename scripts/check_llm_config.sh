@@ -15,17 +15,14 @@ echo "🔍 Current LLM Configuration"
 echo "=============================="
 echo ""
 
-# Check LLM_PROVIDER
-if [ -z "$LLM_PROVIDER" ]; then
-    echo "Provider: OpenAI (default)"
-else
-    echo "Provider: $LLM_PROVIDER"
-fi
+# Provider selection (match implementations/mcp/shared_config.py)
+PROVIDER="${USE_PROVIDER:-${LLM_PROVIDER:-openrouter}}"
+echo "Provider: $PROVIDER"
 
 echo ""
 
 # Check API keys
-if [ "$LLM_PROVIDER" = "openrouter" ]; then
+if [ "$PROVIDER" = "openrouter" ]; then
     echo "OpenRouter Configuration:"
     if [ -z "$OPENROUTER_API_KEY" ]; then
         echo "  ❌ API Key: NOT SET"
@@ -38,7 +35,7 @@ if [ "$LLM_PROVIDER" = "openrouter" ]; then
         echo "  ✅ API Key: ${KEY_PREFIX}..."
     fi
     
-    echo "  Model: ${OPENROUTER_MODEL:-openai/gpt-4o-mini (default)}"
+    echo "  Model: ${TAU_USER_MODEL:-${OPENROUTER_MODEL:-anthropic/claude-haiku-4.5 (default)}}"
 else
     echo "OpenAI Configuration:"
     if [ -z "$OPENAI_API_KEY" ]; then
@@ -48,6 +45,7 @@ else
         KEY_PREFIX="${OPENAI_API_KEY:0:7}"
         echo "  ✅ API Key: ${KEY_PREFIX}..."
     fi
+    echo "  Model: ${TAU_USER_MODEL:-${OPENAI_MODEL:-gpt-4o-mini (default)}}"
 fi
 
 echo ""
