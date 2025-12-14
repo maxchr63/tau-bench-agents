@@ -1,18 +1,18 @@
-import httpx
 import asyncio
 import uuid
 
+import httpx
 
 from a2a.client import A2ACardResolver, A2AClient
 from a2a.types import (
     AgentCard,
     Part,
-    TextPart,
-    MessageSendParams,
-    Message,
     Role,
+    Message,
+    MessageSendParams,
     SendMessageRequest,
     SendMessageResponse,
+    TextPart,
 )
 
 

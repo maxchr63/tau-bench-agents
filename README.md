@@ -445,6 +445,13 @@ Attempt Details:
 
 ## Testing on AgentBeats
 
+This repo supports two common setups:
+
+- **Local AgentBeats UI** (everything runs on localhost; no tunnel needed)
+- **Remote runner / benchmark calling your machine** (expose controllers over ngrok)
+
+### Option A: Local AgentBeats UI (no tunnel)
+
 ### Step 1: Start MCP Agents
 
 ```bash
@@ -513,6 +520,43 @@ In AgentBeats UI:
 2. Select `tau_green_agent_mcp` (green agent/evaluator)
 3. Select `tau_white_agent` (white agent/target)
 4. Click "Start Battle"!
+
+### Option B: Expose both controllers over ngrok (for remote benchmarks)
+
+Use this when your benchmark/runner can’t reach `localhost` and you need **public HTTPS URLs**.
+
+**Prereqs:**
+
+- `ngrok` installed + authenticated once: `ngrok config add-authtoken <token>`
+- `uv sync` already run
+
+**Start both public endpoints (green + white controllers):**
+
+```bash
+./scripts/start_ngrok_ctrls.sh
+```
+
+The script prints two public URLs (one for green, one for white). You can verify:
+
+```bash
+curl https://<green-host>/status
+curl https://<white-host>/status
+```
+
+**ngrok free-tier browser warning**
+
+- If you open the ngrok URL in a **browser**, you may see an ngrok warning interstitial.
+- Server-to-server calls (like AgentBeats backend / HTTP clients) typically still work.
+- If you _must_ hit it from a browser, add header `ngrok-skip-browser-warning: true` (e.g. via ModHeader/Requestly) or use a paid ngrok domain.
+
+**Stop**
+
+- Press `Ctrl-C` in the terminal running the script, or:
+
+```bash
+lsof -ti:8010 -ti:8011 2>/dev/null | xargs kill -9 2>/dev/null
+pgrep -f "tau-bench-agents/.ab/ngrok/ngrok.yml" 2>/dev/null | xargs kill 2>/dev/null
+```
 
 ---
 

@@ -192,13 +192,10 @@ class TauGreenAgentExecutor(AgentExecutor):
     async def execute(self, context: RequestContext, event_queue: EventQueue) -> None:
         logger.info("=== Green agent received task ===")
 
-        # NOTE: Requests routed through trycloudflare.com often hit a ~100s
-        # "time to first byte" limit (HTTP 524) if we don't return quickly.
-        #
-        # AgentBeats/Earthshaker should send `configuration.blocking=false` for
-        # long-running assessments. In that mode, the server can return quickly
-        # with a Task after our first TaskStatusUpdateEvent, and continue
-        # evaluation in the background while updating task state.
+        # NOTE: Long-running assessments should use `configuration.blocking=false`.
+        # In that mode, the server can return quickly with a Task after our first
+        # TaskStatusUpdateEvent, and continue evaluation in the background while
+        # updating task state.
         a2a_task_id = context.task_id or uuid.uuid4().hex
         a2a_context_id = context.context_id or uuid.uuid4().hex
         updater = TaskUpdater(event_queue=event_queue, task_id=a2a_task_id, context_id=a2a_context_id)
@@ -211,12 +208,6 @@ class TauGreenAgentExecutor(AgentExecutor):
         logger.info(
             f"[A2A] request configuration blocking={blocking!r} task_id={a2a_task_id} context_id={a2a_context_id}"
         )
-
-        # Detect if we are running behind a Cloudflare quick tunnel.
-        # (The controller sets AGENT_URL to the externally reachable URL.)
-        agent_url_env = (os.environ.get("AGENT_URL") or os.environ.get("CLOUDRUN_HOST") or "").lower()
-        is_cloudflare = "trycloudflare.com" in agent_url_env
-        cloudflare_blocking = is_cloudflare and (blocking is not False)
 
         await updater.start_work(
             message=updater.new_agent_message(
@@ -299,18 +290,6 @@ class TauGreenAgentExecutor(AgentExecutor):
         max_num_steps = int(self.pass_k_config.get("max_num_steps", 30))
         reset_between_attempts = bool(self.pass_k_config.get("reset_between_attempts", False))
 
-        # Cloudflare-safe defaults:
-        # If the client is making a blocking call (the common case for Earthshaker),
-        # we keep evaluation bounded so the HTTP request can complete before
-        # Cloudflare's ~100s timeout.
-        if cloudflare_blocking and not (isinstance(env_config, dict) and env_config):
-            k = int(os.environ.get("CLOUDFLARE_K", "1"))
-            max_num_steps = int(os.environ.get("CLOUDFLARE_MAX_NUM_STEPS", "12"))
-            reset_between_attempts = False
-            logger.info(
-                f"[CLOUDFLARE] Blocking request detected; using fast defaults k={k}, max_num_steps={max_num_steps}"
-            )
-
         # If the caller provided an explicit env_config (agentify-example style),
         # prefer it for task selection to keep the interface simple.
         tasks_to_evaluate: list[tuple[str, int]]
@@ -389,6 +368,19 @@ class TauGreenAgentExecutor(AgentExecutor):
 
                 # IMPORTANT: do not pass the A2A event_queue into the evaluator.
                 # Message events would be treated as terminal and cause premature queue shutdown.
+                timeout_s: float | None = None
+                max_wall_time_s: float | None = None
+
+                # Optional: if the request is blocking, allow setting a hard timeout to
+                # avoid upstream reverse-proxy/tunnel timeouts.
+                # Set A2A_BLOCKING_TIMEOUT_S (seconds) to enable.
+                is_blocking_call = (blocking is not False)
+                v = (os.environ.get("A2A_BLOCKING_TIMEOUT_S") or "").strip()
+                if is_blocking_call and v:
+                    timeout_s = float(v)
+                    # Leave a small margin for reporting + response serialization.
+                    max_wall_time_s = max(1.0, timeout_s - 5.0)
+
                 eval_coro = tools.evaluate_agent_with_pass_k(
                     white_agent_url=white_agent_url,
                     domain=domain,
@@ -397,12 +389,10 @@ class TauGreenAgentExecutor(AgentExecutor):
                     max_num_steps=max_num_steps,
                     reset_between_attempts=reset_between_attempts,
                     event_queue=None,
+                    max_wall_time_s=max_wall_time_s,
                 )
 
-                if cloudflare_blocking:
-                    import asyncio
-
-                    timeout_s = float(os.environ.get("CLOUDFLARE_BLOCKING_TIMEOUT_S", "90"))
+                if timeout_s is not None:
                     results = await asyncio.wait_for(eval_coro, timeout=timeout_s)
                 else:
                     results = await eval_coro
@@ -410,8 +400,9 @@ class TauGreenAgentExecutor(AgentExecutor):
                 all_results.append(results)
         except asyncio.TimeoutError:
             msg = (
-                "Evaluation timed out (Cloudflare blocking request). "
-                "Reduce k/max steps or run with A2A_DEFAULT_BLOCKING=false and poll tasks."
+                "Evaluation timed out (blocking request). "
+                "Try lowering k/max steps, setting A2A_BLOCKING_TIMEOUT_S, or run with "
+                "A2A_DEFAULT_BLOCKING=false and poll tasks."
             )
             logger.error(msg, exc_info=True)
             await updater.failed(
@@ -451,34 +442,157 @@ class TauGreenAgentExecutor(AgentExecutor):
         logger.info(f"Overall pass^{k_half}: {overall_pass_k_half:.1%}")
         logger.info(f"Overall success rate: {overall_success_rate:.1%}")
 
-        # Send final summary to event queue
-        summary_lines = [
-            "\n" + "="*60,
+        def _truncate(s: str | None, n: int) -> str:
+            s = (s or "").strip()
+            if len(s) <= n:
+                return s
+            return s[: max(0, n - 3)] + "..."
+
+        def _fmt_pf(ok: bool) -> str:
+            return "PASS" if ok else "FAIL"
+
+        # Send final summary to event queue (detailed per-task report)
+        summary_lines: list[str] = [
+            "\n" + "=" * 60,
             "🏁 PASS@K EVALUATION COMPLETE",
-            "="*60,
+            "=" * 60,
             f"\n**Tasks Evaluated**: {total_tasks}",
             f"**Mode**: {mode}",
-            f"**Attempts per task (k)**: {k}",
             "",
             "## Overall Results",
             f"- **pass^{k}**: {overall_pass_k:.1%} ({sum(r['pass_k'] for r in all_results)}/{total_tasks} tasks)",
             f"- **pass^{k_half}**: {overall_pass_k_half:.1%} ({sum(r['pass_k_half'] for r in all_results)}/{total_tasks} tasks)",
             f"- **Success Rate**: {overall_success_rate:.1%}",
             "",
-            "## Per-Task Summary"
         ]
 
-        for idx, result in enumerate(all_results):
-            pass_k_emoji = "✅" if result["pass_k"] else "❌"
-            summary_lines.append(
-                f"{idx + 1}. {result['domain']} task {result['task_id']}: "
-                f"{pass_k_emoji} pass^{k}={result['pass_k']}, "
-                f"success_rate={result['success_rate']:.0%}"
+        for result in all_results:
+            domain = str(result.get("domain", "unknown"))
+            task_id = result.get("task_id", "?")
+            rk = int(result.get("k", k))
+            rk_half = max(1, rk // 2)
+
+            pass_k_val = bool(result.get("pass_k"))
+            pass_k_half_val = bool(result.get("pass_k_half"))
+            success_rate = float(result.get("success_rate", 0.0))
+            avg_steps = float(result.get("avg_steps_on_success", 0.0))
+            total_steps_used = int(result.get("total_steps", 0))
+
+            fb = result.get("failure_breakdown") or {}
+            fb_items: list[tuple[str, int]] = []
+            if isinstance(fb, dict):
+                for cat, cnt in fb.items():
+                    try:
+                        fb_items.append((str(cat), int(cnt)))
+                    except Exception:
+                        continue
+            fb_items.sort(key=lambda kv: kv[1], reverse=True)
+
+            attempts = result.get("attempts") or []
+            # Build fault author/type distributions from attempt failure_detail
+            from collections import Counter
+
+            author_counts: Counter[str] = Counter()
+            type_counts: Counter[str] = Counter()
+            for a in attempts if isinstance(attempts, list) else []:
+                fd = (a or {}).get("failure_detail") or {}
+                if isinstance(fd, dict):
+                    author = str(fd.get("fault_author") or "unknown")
+                    ftype = str(fd.get("fault_type") or "other")
+                    # Only count when the attempt actually failed
+                    if not (a or {}).get("success", False):
+                        author_counts[author] += 1
+                        type_counts[ftype] += 1
+
+            summary_lines.extend(
+                [
+                    "# Pass@k Evaluation Results",
+                    f"**Domain**: {domain} | **Task**: {task_id}",
+                    f"## Attempts ({rk} total)",
+                    "",
+                    "## Metrics",
+                    f"- **pass^{rk}**: {_fmt_pf(pass_k_val)} (all first {rk} attempts must succeed)",
+                    f"- **pass^{rk_half}**: {_fmt_pf(pass_k_half_val)} (any {rk_half} consecutive successes)",
+                    f"- **Success Rate**: {success_rate:.1%} ({int(result.get('num_successes', 0))}/{rk} successful)",
+                    f"- **Avg Steps on Success**: {avg_steps:.1f}",
+                    f"- **Total Steps**: {total_steps_used}",
+                ]
             )
+
+            if fb_items:
+                summary_lines.append("## Failure Breakdown by Category")
+                summary_lines.extend([f"- **{cat}**: {cnt} occurrence(s)" for cat, cnt in fb_items])
+
+            if author_counts:
+                summary_lines.append("## Fault Author Distribution")
+                summary_lines.extend([f"- **{k}**: {v} occurrence(s)" for k, v in author_counts.most_common()])
+
+            if type_counts:
+                summary_lines.append("## Fault Type Distribution")
+                summary_lines.extend([f"- **{k}**: {v} occurrence(s)" for k, v in type_counts.most_common()])
+
+            # Attempt detail section
+            if isinstance(attempts, list) and attempts:
+                summary_lines.append("## Attempt Details")
+                for a in attempts:
+                    attempt_no = a.get("attempt", "?")
+                    ok = bool(a.get("success", False))
+                    steps = a.get("steps", "?")
+                    t_used = a.get("time", None)
+                    t_used_s = f"{float(t_used):.1f}s" if isinstance(t_used, (int, float)) else "?"
+
+                    status = "Succeeded" if ok else "Failed"
+                    summary_lines.append(f"**Attempt {attempt_no}**: {status} (steps={steps}, time={t_used_s})")
+
+                    if ok:
+                        continue
+
+                    fd = a.get("failure_detail") or {}
+                    if not isinstance(fd, dict) or not fd:
+                        err = a.get("error")
+                        if err:
+                            summary_lines.append(f"↳ **Error**: {_truncate(str(err), 300)}")
+                        continue
+
+                    cat = fd.get("category", "unknown_failure")
+                    desc = fd.get("description", "")
+                    fault_author = fd.get("fault_author", "unknown")
+                    fault_type = fd.get("fault_type", "other")
+                    action_score = fd.get("action_score", None)
+                    expected_actions = fd.get("ground_truth_actions") or []
+                    expected_actions_n = len(expected_actions) if isinstance(expected_actions, list) else None
+
+                    instr = fd.get("task_instruction")
+                    if not instr:
+                        tb_info = a.get("tau_bench_info") or {}
+                        if isinstance(tb_info, dict):
+                            instr = (tb_info.get("task") or {}).get("instruction")
+
+                    summary_lines.append(f"↳ **Category**: {cat}")
+                    if desc:
+                        summary_lines.append(f"↳ **Description**: {_truncate(str(desc), 400)}")
+                    summary_lines.append(f"↳ **Fault**: {fault_author} | **Type**: {fault_type}")
+                    if action_score is not None:
+                        try:
+                            summary_lines.append(f"↳ **Action Score (r_actions)**: {float(action_score):.1f}")
+                        except Exception:
+                            pass
+                    if expected_actions_n is not None and expected_actions_n > 0:
+                        summary_lines.append(f"↳ **Expected # of actions**: {expected_actions_n}")
+                    if instr:
+                        summary_lines.append(f"↳ **Task**: {_truncate(str(instr), 220)}")
+
+            summary_lines.append("")  # spacer between tasks
+
+        # Guard against extremely large payloads (controller/UI may truncate)
+        final_text = "\n".join(summary_lines).strip()
+        max_chars = int(os.environ.get("MAX_SUMMARY_CHARS", "25000"))
+        if len(final_text) > max_chars:
+            final_text = final_text[: max(0, max_chars - 120)] + "\n\n...[TRUNCATED: summary too long]..."
 
         await updater.complete(
             message=updater.new_agent_message(
-                parts=[Part(root=TextPart(text="\n".join(summary_lines)))]
+                parts=[Part(root=TextPart(text=final_text))]
             )
         )
 
@@ -522,7 +636,7 @@ def start_green_agent(agent_name="tau_green_agent_mcp", host="localhost", port=9
 
     default_blocking = _default_blocking_behavior(url)
     if not default_blocking:
-        logger.info("[A2A] Defaulting to NON-BLOCKING message/send (Cloudflare-safe)")
+        logger.info("[A2A] Defaulting to NON-BLOCKING message/send")
 
     request_handler = TauRequestHandler(
         agent_executor=TauGreenAgentExecutor(),

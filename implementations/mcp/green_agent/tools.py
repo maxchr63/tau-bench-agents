@@ -797,7 +797,8 @@ async def evaluate_agent_with_pass_k(
     k: int = 4,
     max_num_steps: int = 30,
     reset_between_attempts: bool = True,
-    event_queue: Optional[Any] = None
+    event_queue: Optional[Any] = None,
+    max_wall_time_s: float | None = None,
 ) -> Dict[str, Any]:
     """
     Evaluate white agent with k independent attempts on a task.
@@ -842,12 +843,42 @@ async def evaluate_agent_with_pass_k(
         task_index=task_id
     )
 
+    # Optional wall-clock budget across ALL attempts (useful behind strict tunnels/proxies).
+    started_wall = time.time()
+
     # Run k attempts
     attempts = []
     failure_reasons = []
     total_steps = 0
 
     for attempt_num in range(k):
+        # Stop early if we are out of wall-clock budget; still record placeholder attempts
+        # so pass^k metrics remain well-defined.
+        if max_wall_time_s is not None:
+            elapsed = time.time() - started_wall
+            # Leave a small margin to finish formatting and return the response.
+            if elapsed >= max_wall_time_s - 2.0:
+                for remaining in range(attempt_num, k):
+                    placeholder_error = "time_budget_exceeded"
+                    failure_detail = extract_failure_details(
+                        {"steps_completed": 0, "max_steps_reached": False},
+                        placeholder_error,
+                    )
+                    attempts.append(
+                        {
+                            "attempt": remaining + 1,
+                            "success": False,
+                            "reward": 0.0,
+                            "steps": 0,
+                            "time": 0.0,
+                            "error": placeholder_error,
+                            "failure_detail": failure_detail,
+                            "tau_bench_info": {},
+                        }
+                    )
+                    failure_reasons.append(failure_detail["category"])
+                break
+
         logger.info(f"--- Attempt {attempt_num + 1}/{k} ---")
         logger.info(f"[DEBUG] ========== ATTEMPT {attempt_num + 1}/{k} STARTING ==========")
 
@@ -902,11 +933,16 @@ User message: {obs}
         context_id = f"attempt_{attempt_num + 1}_{uuid4().hex[:8]}"
         steps_in_attempt = 0
         attempt_error = None
+        done = False
 
         # Evaluation loop for this attempt
         for _ in range(max_num_steps):
             steps_in_attempt += 1
             total_steps += 1
+
+            if max_wall_time_s is not None and (time.time() - started_wall) >= max_wall_time_s - 2.0:
+                attempt_error = "time_budget_exceeded"
+                break
 
             try:
                 # Send message to white agent
@@ -988,12 +1024,18 @@ User message: {obs}
                     next_green_message = f"User message:\n{env_response.observation}"
 
                 if env_response.done:
+                    done = True
                     break
 
             except Exception as e:
                 attempt_error = f"Exception: {type(e).__name__}: {str(e)}"
                 logger.error(attempt_error, exc_info=True)
                 break
+
+        # If we exhausted the step budget without reaching a terminal env state,
+        # surface that as a clear failure reason (otherwise it looks "unknown").
+        if not done and attempt_error is None and steps_in_attempt >= max_num_steps:
+            attempt_error = f"max_steps_reached ({max_num_steps})"
 
         logger.info(f"Attempt {attempt_num + 1} completed: {steps_in_attempt} steps, reward={reward}")
         
@@ -1004,7 +1046,14 @@ User message: {obs}
         # Extract detailed failure information from tau-bench
         failure_detail = None
         if not success:
-            failure_detail = extract_failure_details(info, attempt_error)
+            # Tau-bench doesn't always populate reward_info on failure in `info`,
+            # so include step context to get a meaningful category like task_incomplete.
+            info_with_steps = {
+                **(info or {}),
+                "steps_completed": steps_in_attempt,
+                "max_steps_reached": (steps_in_attempt >= max_num_steps and not done),
+            }
+            failure_detail = extract_failure_details(info_with_steps, attempt_error)
             failure_reason = failure_detail["category"]
             failure_reasons.append(failure_reason)
 
@@ -1194,6 +1243,24 @@ def extract_failure_details(info: Dict[str, Any], error: Optional[str]) -> Dict[
     if error:
         logger.info(f"[DEBUG extract_failure_details] Processing explicit error: {error}")
         failure_detail["fault_author"] = "environment"  # Communication/system errors
+
+        if "time_budget_exceeded" in error.lower():
+            failure_detail["category"] = "timeout"
+            failure_detail["fault_author"] = "environment"
+            failure_detail["fault_type"] = "other"
+            failure_detail["description"] = "Stopped early due to overall wall-clock time budget."
+            logger.info(f"[DEBUG extract_failure_details] Categorized as: {failure_detail['category']}")
+            return failure_detail
+
+        if "max_steps_reached" in error.lower():
+            failure_detail["category"] = "task_incomplete"
+            failure_detail["fault_author"] = "agent"
+            failure_detail["fault_type"] = "goal_partially_completed"
+            failure_detail["description"] = (
+                "Evaluation hit the maximum step limit before the task reached a terminal success state."
+            )
+            logger.info(f"[DEBUG extract_failure_details] Categorized as: {failure_detail['category']}")
+            return failure_detail
 
         if "timeout" in error.lower():
             failure_detail["category"] = "timeout"
